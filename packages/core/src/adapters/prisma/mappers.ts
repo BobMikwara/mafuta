@@ -1,3 +1,4 @@
+import type { InputJsonValue } from '@prisma/client/runtime/library';
 import type { Site } from '../../domain/site.js';
 import type { Tank } from '../../domain/tank.js';
 import type { TankReading } from '../../domain/reading.js';
@@ -120,7 +121,11 @@ export function toDomainTank(row: {
     siteId: row.stationId as SiteId,
     name: row.name,
     product: toDomainFuelProduct(row.product),
-    geometry: (row.geometry as Tank['geometry']) ?? { kind: 'vertical-cylinder', diameterMm: 2000, heightMm: 3000 },
+    geometry: (row.geometry as Tank['geometry']) ?? {
+      kind: 'vertical-cylinder',
+      diameterMm: 2000,
+      heightMm: 3000,
+    },
     capacityLitres: toNum(row.capacityLitres),
     thresholds: {
       criticalLowPercent: toNum(row.criticalLowPercent),
@@ -145,7 +150,7 @@ export function toPrismaTankInput(tank: Tank): {
   name: string;
   product: FuelProductPrisma;
   capacityLitres: number;
-  geometry: unknown;
+  geometry: InputJsonValue;
   criticalLowPercent: number;
   lowPercent: number;
   highPercent: number;
@@ -163,7 +168,7 @@ export function toPrismaTankInput(tank: Tank): {
     name: tank.name,
     product: toPrismaFuelProduct(tank.product),
     capacityLitres: tank.capacityLitres,
-    geometry: tank.geometry as unknown,
+    geometry: tank.geometry as unknown as InputJsonValue,
     criticalLowPercent: tank.thresholds.criticalLowPercent,
     lowPercent: tank.thresholds.lowPercent,
     highPercent: tank.thresholds.highPercent,
@@ -354,7 +359,7 @@ export function toPrismaAlertInput(alarm: Alarm): {
   severity: string;
   status: string;
   message: string;
-  metrics: unknown;
+  metrics: InputJsonValue;
   raisedAt: Date;
 } {
   const metrics: Record<string, unknown> = { ...alarm.metrics };
@@ -370,7 +375,7 @@ export function toPrismaAlertInput(alarm: Alarm): {
     severity: alarm.severity,
     status: alarm.status,
     message: alarm.message,
-    metrics,
+    metrics: metrics as unknown as InputJsonValue,
     raisedAt: new Date(alarm.raisedAt),
   };
 }
