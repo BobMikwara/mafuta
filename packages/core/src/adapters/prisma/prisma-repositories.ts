@@ -256,15 +256,11 @@ class PrismaAlarmRepository implements AlarmRepository {
         id: input.id,
         tenantId: input.tenantId,
         tankId: input.tankId,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        type: input.type as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        severity: input.severity as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        status: input.status as any,
+        type: input.type,
+        severity: input.severity,
+        status: input.status,
         message: input.message,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        metrics: input.metrics as any,
+        metrics: input.metrics,
         raisedAt: input.raisedAt,
       },
     });
@@ -280,15 +276,11 @@ class PrismaAlarmRepository implements AlarmRepository {
     const row = await prisma.alert.update({
       where: { id: alarm.id },
       data: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        type: input.type as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        severity: input.severity as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        status: input.status as any,
+        type: input.type,
+        severity: input.severity,
+        status: input.status,
         message: input.message,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        metrics: input.metrics as any,
+        metrics: input.metrics,
       },
     });
 
@@ -312,12 +304,7 @@ class PrismaAlarmRepository implements AlarmRepository {
       where: {
         tenantId,
         ...(query.tankId ? { tankId: query.tankId } : {}),
-        ...(query.status
-          ? {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              status: query.status as any,
-            }
-          : {}),
+        ...(query.status ? { status: query.status } : {}),
       },
       orderBy: [{ raisedAt: 'desc' }, { id: 'desc' }],
       take: clampLimit(query.limit),
@@ -331,10 +318,7 @@ class PrismaAlarmRepository implements AlarmRepository {
       where: {
         tenantId,
         tankId,
-        status: {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          in: ['open', 'acknowledged'] as any,
-        },
+        status: { in: ['open', 'acknowledged'] },
       },
       orderBy: { raisedAt: 'asc' },
     });
