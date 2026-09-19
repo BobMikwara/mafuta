@@ -79,11 +79,15 @@ export function registerTankRoutes(
         ...(body.signalQualityPercent === undefined
           ? {}
           : { signalQualityPercent: body.signalQualityPercent }),
+        ...(body.idempotencyKey === undefined ? {} : { idempotencyKey: body.idempotencyKey }),
       };
 
       const result = await dependencies.ingest.ingest(currentTenantId(request), sample);
-      return reply.code(201).send({
+      // A retry returns 200 with the original reading. 201 is reserved for a
+      // reading that was actually stored, so a client can tell the two apart.
+      return reply.code(result.duplicate ? 200 : 201).send({
         reading: result.reading,
+        duplicate: result.duplicate,
         alarmsRaised: result.raisedAlarms,
         alarmsResolved: result.resolvedAlarms,
       });

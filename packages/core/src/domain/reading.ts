@@ -31,4 +31,10 @@ export interface TankReading {
   readonly quality: ReadingQuality;
   /** Identifier of the physical probe, null for manual and simulated entries. */
   readonly deviceId: string | null;
+  /**
+   * Submission identity. Supplied by the device, otherwise derived from
+   * tenant, tank, device and observation time. Resubmitting the same
+   * observation returns the original reading instead of creating a second one.
+   */
+  readonly idempotencyKey: string;
 }

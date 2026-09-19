@@ -12,10 +12,15 @@ prisma/
     0001_init/
       migration.sql                 Baseline schema.
       rollback.sql                  Reverse step, applied manually.
+    0002_idempotency_key/
+      migration.sql                 Mandatory, tenant scoped idempotency key.
+      rollback.sql                  Reverse step, applied manually.
   test/
-    migration.test.ts               Applies the migration to a real PostgreSQL
+    migration.test.ts               Applies the baseline to a real PostgreSQL
                                     instance through PGlite and asserts the
                                     TRD data rules.
+    idempotency-migration.test.ts   Applies 0001 then 0002 and asserts the
+                                    duplicate and cross-tenant behaviour.
 ```
 
 ## Local setup
@@ -53,13 +58,18 @@ check against a PostgreSQL service container.
 
 ## Rollback
 
-Prisma does not apply rollback files. To reverse `0001_init`:
+Prisma does not apply rollback files. To reverse a migration, apply its
+`rollback.sql` by hand in reverse order:
 
 ```bash
+psql "$DATABASE_URL" -f prisma/migrations/0002_idempotency_key/rollback.sql
 psql "$DATABASE_URL" -f prisma/migrations/0001_init/rollback.sql
 ```
 
-Take a backup first. The rollback drops tables and types, and it destroys data.
+Take a backup first. The `0001_init` rollback drops tables and types, and it
+destroys data. The `0002` rollback only relaxes a column and swaps an index, and
+it leaves the backfilled key values in place, which is harmless because they are
+opaque identifiers.
 
 ## Rules this schema follows
 
@@ -78,9 +88,12 @@ From TRD section 4:
 ## Verification status
 
 `0001_init` was executed against PostgreSQL 18 and produces 13 tables, 20 enum
-types and 43 indexes. The assertions in `test/migration.test.ts` cover the
-decimal types, both timestamps, the idempotency constraint, tenant cascades,
-cross-tenant rejection at the foreign key level, and the rollback.
+types and 43 indexes. `0002_idempotency_key` was executed on top of it. The
+assertions in `test/migration.test.ts` cover the decimal types, both timestamps,
+tenant cascades, cross-tenant rejection at the foreign key level, and the
+rollback. `test/idempotency-migration.test.ts` covers the mandatory key, the
+backfill of rows written before it was mandatory, duplicate rejection within a
+tenant, isolation between tenants, and the `0002` rollback.
 
 The Prisma CLI engine binaries could not be downloaded in the environment where
 this baseline was written, so `prisma validate` and `prisma migrate diff` have

@@ -97,6 +97,8 @@ class MemoryTankRepository implements TankRepository {
 
 class MemoryReadingRepository implements ReadingRepository {
   private readonly store = new Map<string, TankReading>();
+  /** Mirrors the unique index on (tenantId, idempotencyKey). */
+  private readonly byIdempotencyKey = new Map<string, string>();
 
   async append(tenantId: TenantId, reading: TankReading): Promise<TankReading> {
     assertOwnedByTenant(tenantId, reading, 'readings.append');
@@ -104,7 +106,16 @@ class MemoryReadingRepository implements ReadingRepository {
     if (this.store.has(key)) {
       throw new ConflictError(`Reading ${reading.id} already exists`);
     }
+    const idempotencyKey = scopedKey(tenantId, reading.idempotencyKey);
+    if (this.byIdempotencyKey.has(idempotencyKey)) {
+      // Same behaviour as the database unique violation: the caller is
+      // expected to have looked the key up first, so this is a race.
+      throw new ConflictError(
+        `Reading with idempotency key ${reading.idempotencyKey} already exists`,
+      );
+    }
     this.store.set(key, clone(reading));
+    this.byIdempotencyKey.set(idempotencyKey, reading.id);
     return clone(reading);
   }
 
@@ -114,6 +125,18 @@ class MemoryReadingRepository implements ReadingRepository {
       return null;
     }
     return clone(assertOwnedByTenant(tenantId, found, 'readings.findById'));
+  }
+
+  async findByIdempotencyKey(tenantId: TenantId, key: string): Promise<TankReading | null> {
+    const id = this.byIdempotencyKey.get(scopedKey(tenantId, key));
+    if (id === undefined) {
+      return null;
+    }
+    const found = this.store.get(scopedKey(tenantId, id));
+    if (found === undefined) {
+      return null;
+    }
+    return clone(assertOwnedByTenant(tenantId, found, 'readings.findByIdempotencyKey'));
   }
 
   async list(tenantId: TenantId, query: ReadingQuery): Promise<ReadonlyArray<TankReading>> {

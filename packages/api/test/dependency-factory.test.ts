@@ -7,7 +7,11 @@ const TENANT = toTenantId('tenant-a');
 describe('platform dependencies', () => {
   it('issues a credential that can authenticate immediately', async () => {
     const deps = createPlatformDependencies({ logger: createSilentLogger() });
-    const issued = await deps.issueApiKey({ tenantId: TENANT, name: 'device', scopes: ['tanks:read'] });
+    const issued = await deps.issueApiKey({
+      tenantId: TENANT,
+      name: 'device',
+      scopes: ['tanks:read'],
+    });
 
     const found = await deps.apiKeys.findBySecret(issued.secret);
     expect(found?.tenantId).toBe(TENANT);

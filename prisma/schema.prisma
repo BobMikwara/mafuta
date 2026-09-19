@@ -352,9 +352,11 @@ model TankReading {
   freshnessStatus FreshnessStatus @default(fresh)
   sourceProtocol SourceProtocol  @default(http)
 
-  /// Client supplied idempotency key, unique per device. Duplicate submissions
-  /// return the original reading instead of creating a second row.
-  idempotencyKey String?
+  /// Submission identity, unique per tenant. Supplied by the device, otherwise
+  /// derived by the application from tenant, tank, device and observation time.
+  /// Duplicate submissions return the original reading instead of creating a
+  /// second row, which would otherwise look like a real drop in the fuel ledger.
+  idempotencyKey String
   /// Reference to the retained raw payload, which is access restricted.
   rawMessageId   String?
 
@@ -364,7 +366,11 @@ model TankReading {
   tank   Tank   @relation(fields: [tankId], references: [id], onDelete: Cascade)
   device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
 
-  @@unique([deviceId, idempotencyKey])
+  /// Scoped by tenant rather than device: PostgreSQL treats NULL as distinct,
+  /// so an index on (deviceId, idempotencyKey) cannot protect a manual dip that
+  /// has no device. The tenant id is part of the derived key, so two customers
+  /// sharing a device identifier can never collapse onto one reading.
+  @@unique([tenantId, idempotencyKey])
   @@index([tankId, recordedAt])
   @@index([tenantId, createdAt])
   @@index([tankId, qualityStatus, recordedAt])

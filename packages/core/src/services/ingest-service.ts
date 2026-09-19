@@ -7,6 +7,7 @@ import {
 import type { Alarm } from '../domain/alarm.js';
 import type { ProbeSample } from '../domain/normalize.js';
 import { normalizeProbeSample } from '../domain/normalize.js';
+import { deriveIdempotencyKey } from '../domain/idempotency.js';
 import type { TankReading } from '../domain/reading.js';
 import { ConflictError, NotFoundError, TenantIsolationError } from '../errors.js';
 import type { Logger } from '../logging/logger.js';
@@ -26,6 +27,13 @@ export interface IngestResult {
   readonly reading: TankReading;
   readonly raisedAlarms: ReadonlyArray<Alarm>;
   readonly resolvedAlarms: ReadonlyArray<Alarm>;
+  /**
+   * True when the submission was a retry of an observation already recorded.
+   * The stored reading is returned unchanged and no alarms are re-evaluated,
+   * because re-running the rules against the same reading would raise a
+   * duplicate investigation alert.
+   */
+  readonly duplicate: boolean;
 }
 
 /**
@@ -56,8 +64,40 @@ export class IngestService {
         throw new ConflictError(`Tank ${tank.id} is decommissioned and rejects new readings`);
       }
 
+      // Resolve the submission identity before touching the ledger. A device
+      // that retries an upload after a dropped connection must not create a
+      // second reading, because a duplicated dip looks exactly like a sudden
+      // drop to the alarm rules.
+      const idempotencyKey =
+        sample.idempotencyKey ??
+        deriveIdempotencyKey({
+          tenantId,
+          tankId: tank.id,
+          deviceId: sample.deviceId,
+          observedAt: sample.observedAt,
+        });
+
+      const existing = await this.repositories.readings.findByIdempotencyKey(
+        tenantId,
+        idempotencyKey,
+      );
+      if (existing !== null) {
+        this.logger.info('reading.duplicate.ignored', {
+          tenantId,
+          tankId: tank.id,
+          readingId: existing.id,
+          idempotencyKey,
+          source: sample.source,
+        });
+        return { reading: existing, raisedAlarms: [], resolvedAlarms: [], duplicate: true };
+      }
+
       const receivedAt = this.clock.now().toISOString();
-      const reading = normalizeProbeSample(tank, sample, { tenantId, receivedAt });
+      const reading = normalizeProbeSample(tank, sample, {
+        tenantId,
+        receivedAt,
+        idempotencyKey,
+      });
       await this.repositories.readings.append(tenantId, reading);
 
       const recent = await this.repositories.readings.list(tenantId, {
@@ -103,7 +143,7 @@ export class IngestService {
         alarmsRaised: raisedAlarms.length,
       });
 
-      return { reading, raisedAlarms, resolvedAlarms };
+      return { reading, raisedAlarms, resolvedAlarms, duplicate: false };
     } catch (error) {
       if (error instanceof TenantIsolationError) {
         this.logger.critical('tenant.isolation.violation', {

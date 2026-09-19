@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ValidationError } from '../errors.js';
+import { isClientIdempotencyKey } from '../domain/idempotency.js';
 import { FUEL_PRODUCTS } from '../domain/tank.js';
 import { DEFAULT_TANK_THRESHOLDS } from '../domain/tank.js';
 import {
@@ -172,6 +173,17 @@ const ingestReadingObjectSchema = z
       .default(null),
     source: z.enum(['simulated', 'device', 'manual']).default('device'),
     signalQualityPercent: z.number().finite().min(0).max(100).optional(),
+    // Client supplied submission identity. When omitted the platform derives
+    // one from the sample, so a plain retry still collapses onto the original
+    // reading instead of creating a duplicate dip.
+    idempotencyKey: z
+      .string()
+      .trim()
+      .refine(isClientIdempotencyKey, {
+        message:
+          'idempotencyKey must be 8-200 characters of letters, digits, dot, underscore, colon or hyphen',
+      })
+      .optional(),
   })
   .strict();
 

@@ -46,6 +46,11 @@ export interface TankRepository {
 export interface ReadingRepository {
   append(tenantId: TenantId, reading: TankReading): Promise<TankReading>;
   findById(tenantId: TenantId, id: ReadingId): Promise<TankReading | null>;
+  /**
+   * Resolves a reading by its submission identity. Backed by a unique index on
+   * (tenantId, idempotencyKey) so that concurrent retries cannot both insert.
+   */
+  findByIdempotencyKey(tenantId: TenantId, key: string): Promise<TankReading | null>;
   list(tenantId: TenantId, query: ReadingQuery): Promise<ReadonlyArray<TankReading>>;
   latest(tenantId: TenantId, tankId: TankId): Promise<TankReading | null>;
 }

@@ -237,3 +237,121 @@ describe('fleet service', () => {
     );
   });
 });
+
+describe('ingest idempotency', () => {
+  let repositories: ReturnType<typeof createMemoryRepositories>;
+  let sink: ReturnType<typeof createMemoryLogSink>;
+  let ingest: IngestService;
+
+  beforeEach(async () => {
+    repositories = createMemoryRepositories();
+    sink = createMemoryLogSink();
+    ingest = new IngestService({ repositories, clock: NOW, logger: createLogger({ sink }) });
+    await repositories.sites.save(TENANT_A, makeSite({ id: 'site-1' as never }));
+    await repositories.tanks.save(TENANT_A, makeTank());
+  });
+
+  it('returns the original reading when the same observation is submitted twice', async () => {
+    const first = await ingest.ingest(TENANT_A, sample());
+    const second = await ingest.ingest(TENANT_A, sample());
+
+    expect(first.duplicate).toBe(false);
+    expect(second.duplicate).toBe(true);
+    expect(second.reading.id).toBe(first.reading.id);
+    expect(await repositories.readings.list(TENANT_A, { tankId: makeTank().id })).toHaveLength(1);
+  });
+
+  it('does not re-raise alarms for a replayed submission', async () => {
+    const first = await ingest.ingest(
+      TENANT_A,
+      sample({ levelMm: 500, waterLevelMm: 0, observedAt: '2026-01-01T00:00:00.000Z' }),
+    );
+    expect(first.raisedAlarms.length).toBeGreaterThan(0);
+
+    const replay = await ingest.ingest(
+      TENANT_A,
+      sample({ levelMm: 500, waterLevelMm: 0, observedAt: '2026-01-01T00:00:00.000Z' }),
+    );
+    expect(replay.duplicate).toBe(true);
+    expect(replay.raisedAlarms).toEqual([]);
+    expect(await repositories.alarms.list(TENANT_A)).toHaveLength(first.raisedAlarms.length);
+  });
+
+  it('honours an explicit client supplied key', async () => {
+    const first = await ingest.ingest(
+      TENANT_A,
+      sample({ idempotencyKey: 'client-key-0001', observedAt: '2026-01-01T00:00:00.000Z' }),
+    );
+    // A different instant with the same client key is still the same submission.
+    const second = await ingest.ingest(
+      TENANT_A,
+      sample({ idempotencyKey: 'client-key-0001', observedAt: '2026-01-01T00:09:00.000Z' }),
+    );
+
+    expect(first.reading.idempotencyKey).toBe('client-key-0001');
+    expect(second.duplicate).toBe(true);
+    expect(second.reading.id).toBe(first.reading.id);
+  });
+
+  it('stores a distinct reading when the observation genuinely differs', async () => {
+    const first = await ingest.ingest(TENANT_A, sample({ observedAt: '2026-01-01T00:00:00.000Z' }));
+    const second = await ingest.ingest(
+      TENANT_A,
+      sample({ observedAt: '2026-01-01T00:05:00.000Z' }),
+    );
+
+    expect(second.duplicate).toBe(false);
+    expect(second.reading.id).not.toBe(first.reading.id);
+    expect(second.reading.idempotencyKey).not.toBe(first.reading.idempotencyKey);
+  });
+
+  it('does not collapse the same observation across two devices', async () => {
+    const first = await ingest.ingest(TENANT_A, sample({ deviceId: 'probe-1' }));
+    const second = await ingest.ingest(TENANT_A, sample({ deviceId: 'probe-2' }));
+
+    expect(second.duplicate).toBe(false);
+    expect(second.reading.id).not.toBe(first.reading.id);
+  });
+
+  it('never lets one tenant reuse another tenant submission key', async () => {
+    await repositories.sites.save(
+      TENANT_B,
+      makeSite({ id: 'site-1' as never, tenantId: TENANT_B }),
+    );
+    await repositories.tanks.save(TENANT_B, makeTank({ tenantId: TENANT_B }));
+
+    const first = await ingest.ingest(TENANT_A, sample());
+    const second = await ingest.ingest(TENANT_B, sample());
+
+    expect(second.duplicate).toBe(false);
+    expect(second.reading.id).not.toBe(first.reading.id);
+    expect(second.reading.tenantId).toBe(TENANT_B);
+  });
+
+  it('rejects a direct append that collides with an existing key', async () => {
+    const first = await ingest.ingest(TENANT_A, sample());
+    await expect(
+      repositories.readings.append(TENANT_A, {
+        ...first.reading,
+        id: 'rdg-different-id' as never,
+      }),
+    ).rejects.toThrow(ConflictError);
+  });
+
+  it('exposes the submission key on the stored reading', async () => {
+    const result = await ingest.ingest(TENANT_A, sample());
+    expect(result.reading.idempotencyKey).toMatch(/^idem_[0-9a-f]{48}$/);
+
+    const stored = await repositories.readings.findByIdempotencyKey(
+      TENANT_A,
+      result.reading.idempotencyKey,
+    );
+    expect(stored?.id).toBe(result.reading.id);
+  });
+
+  it('logs a replay so the operator can see the device retried', async () => {
+    await ingest.ingest(TENANT_A, sample());
+    await ingest.ingest(TENANT_A, sample());
+    expect(sink.records.map((entry) => entry.message)).toContain('reading.duplicate.ignored');
+  });
+});

@@ -1,3 +1,4 @@
+import { deriveIdempotencyKey } from './idempotency.js';
 import { maxLevelMm, volumeAtLevelLitres } from './geometry.js';
 import type { Tank } from './tank.js';
 import type { TankReading, ReadingQuality, ReadingSource } from './reading.js';
@@ -19,12 +20,20 @@ export interface ProbeSample {
   readonly source: ReadingSource;
   /** Optional 0-100 signal quality reported by the probe. */
   readonly signalQualityPercent?: number;
+  /**
+   * Submission identity supplied by the client. When absent the platform
+   * derives one from the sample itself, which makes an unkeyed retry of the
+   * same observation collapse onto the original reading.
+   */
+  readonly idempotencyKey?: string;
 }
 
 export interface NormalizeContext {
   readonly tenantId: TankReading['tenantId'];
   readonly receivedAt: string;
   readonly readingId?: ReadingId;
+  /** Overrides the derived idempotency key. Used when the caller computed it. */
+  readonly idempotencyKey?: string;
 }
 
 const SIGNAL_QUALITY_SUSPECT_PERCENT = 40;
@@ -88,6 +97,15 @@ export function normalizeProbeSample(
     source: sample.source,
     quality,
     deviceId: sample.deviceId,
+    idempotencyKey:
+      context.idempotencyKey ??
+      sample.idempotencyKey ??
+      deriveIdempotencyKey({
+        tenantId: context.tenantId,
+        tankId: tank.id,
+        deviceId: sample.deviceId,
+        observedAt: sample.observedAt,
+      }),
   };
 }
 

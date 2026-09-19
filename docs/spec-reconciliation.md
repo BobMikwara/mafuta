@@ -8,24 +8,24 @@ done about it.
 
 ## Summary
 
-| Area              | Spec says                                                                                                       | Foundation did                                                      | Verdict                                                                            |
-| ----------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Database          | PostgreSQL, Prisma migrations (non-negotiable)                                                                  | In-memory repositories                                              | Fixed this increment for schema and migrations. Repository implementation is next. |
-| Volume arithmetic | numeric, not binary floating point                                                                              | JavaScript `number`                                                 | Not yet fixed. Highest remaining data-integrity risk.                              |
-| Entity name       | Station                                                                                                         | Site                                                                | Not yet renamed. Blocks nothing today, grows costly later.                         |
-| Idempotency       | Unique key per device message (non-negotiable)                                                                  | Not implemented                                                     | Schema and constraint done. Service logic is next.                                 |
-| Raw payloads      | Retained, immutable, restricted                                                                                 | Not implemented                                                     | Table done. Access control and write path are next.                                |
-| Users and roles   | Users, roles, hashed passwords, MFA-ready                                                                       | API keys only                                                       | Not started. API keys remain correct for devices.                                  |
-| Audit log         | Privileged actions logged                                                                                       | Not implemented                                                     | Table done. Write path is next.                                                    |
-| Events            | FuelEvent with confidence, evidence, operator decision                                                          | Candidate events raised as alerts                                   | Not yet split.                                                                     |
-| Theft wording     | Never classify unexplained movement as theft                                                                    | Alarm message says "possible leak or theft"                         | Not yet corrected. Wording violates the rule as written.                           |
-| Alerts            | low, critical, offline, stale, probe quality, candidate events, water                                           | Similar set, different names                                        | Partially aligned.                                                                 |
-| Provenance        | Distinguish measured, recorded, estimated, inferred                                                             | quality only (ok, suspect, invalid)                                 | Schema done. Code is next.                                                         |
-| Rate limits       | Required on ingestion and auth                                                                                  | Not implemented                                                     | Not started.                                                                       |
-| Clock skew        | Reject or mark for review                                                                                       | Not implemented                                                     | Not started.                                                                       |
-| Frontend          | React with TypeScript                                                                                           | Vanilla JavaScript console                                          | Not started.                                                                       |
-| Timezone default  | Tanzania first                                                                                                  | Demo used Africa/Nairobi                                            | Fixed in the schema default. Demo data is next.                                    |
-| Repository layout | apps/api, apps/web, packages/shared, packages/device-contracts, services/processing, prisma, docs, tests, infra | packages/core, packages/api, apps/api-server, apps/simulator-runner | Not yet restructured. Suggested, not mandatory.                                    |
+| Area              | Spec says                                                                                                       | Foundation did                                                      | Verdict                                                                              |
+| ----------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Database          | PostgreSQL, Prisma migrations (non-negotiable)                                                                  | In-memory repositories                                              | Fixed this increment for schema and migrations. Repository implementation is next.   |
+| Volume arithmetic | numeric, not binary floating point                                                                              | JavaScript `number`                                                 | Not yet fixed. Highest remaining data-integrity risk.                                |
+| Entity name       | Station                                                                                                         | Site                                                                | Not yet renamed. Blocks nothing today, grows costly later.                           |
+| Idempotency       | Unique key per device message (non-negotiable)                                                                  | Not implemented                                                     | Done. Derived or client supplied key, enforced in the service and by a unique index. |
+| Raw payloads      | Retained, immutable, restricted                                                                                 | Not implemented                                                     | Table done. Access control and write path are next.                                  |
+| Users and roles   | Users, roles, hashed passwords, MFA-ready                                                                       | API keys only                                                       | Not started. API keys remain correct for devices.                                    |
+| Audit log         | Privileged actions logged                                                                                       | Not implemented                                                     | Table done. Write path is next.                                                      |
+| Events            | FuelEvent with confidence, evidence, operator decision                                                          | Candidate events raised as alerts                                   | Not yet split.                                                                       |
+| Theft wording     | Never classify unexplained movement as theft                                                                    | Alarm message says "possible leak or theft"                         | Not yet corrected. Wording violates the rule as written.                             |
+| Alerts            | low, critical, offline, stale, probe quality, candidate events, water                                           | Similar set, different names                                        | Partially aligned.                                                                   |
+| Provenance        | Distinguish measured, recorded, estimated, inferred                                                             | quality only (ok, suspect, invalid)                                 | Schema done. Code is next.                                                           |
+| Rate limits       | Required on ingestion and auth                                                                                  | Not implemented                                                     | Not started.                                                                         |
+| Clock skew        | Reject or mark for review                                                                                       | Not implemented                                                     | Not started.                                                                         |
+| Frontend          | React with TypeScript                                                                                           | Vanilla JavaScript console                                          | Not started.                                                                         |
+| Timezone default  | Tanzania first                                                                                                  | Demo used Africa/Nairobi                                            | Fixed in the schema default. Demo data is next.                                      |
+| Repository layout | apps/api, apps/web, packages/shared, packages/device-contracts, services/processing, prisma, docs, tests, infra | packages/core, packages/api, apps/api-server, apps/simulator-runner | Not yet restructured. Suggested, not mandatory.                                      |
 
 ## Decisions taken deliberately
 
@@ -49,8 +49,8 @@ two ever disagree, CI fails rather than silently drifting.
    is done.
 2. **Rename Site to Station** across the domain, API, and database, while the surface is
    still small.
-3. **Ingestion hardening**: idempotency keys, raw payload retention with restricted read
-   access, clock-skew policy, capacity tolerance, and rate limits.
+3. **Ingestion hardening**: ~~idempotency keys~~ done, raw payload retention with restricted
+   read access, clock-skew policy, capacity tolerance, and rate limits.
 4. **Events and alerts**: split `FuelEvent` from `Alert`, add confidence and evidence, add
    operator confirm and reject, and remove the theft wording.
 5. **Identity**: users, roles, hashed passwords, short-lived tokens, station scopes, and
@@ -77,3 +77,26 @@ These block or materially affect the work above.
    partitioning strategy for `tank_readings`.
 6. **MVP tenant count.** How many companies and stations must the first pilot support?
    This decides whether the current single-process assumptions hold.
+
+## Increment log
+
+### Idempotent ingestion (done)
+
+A replayed device upload used to create a second reading, which the alarm rules would read as
+a genuine drop in the fuel ledger. Every submission now carries an identity:
+
+- the client may send `idempotencyKey` (8 to 200 printable characters, no whitespace);
+- otherwise the platform derives one with SHA-256 over tenant, tank, device and the
+  observation instant, so an unkeyed retry collapses onto the original reading too;
+- `IngestService` resolves the key before writing and returns the stored reading with
+  `duplicate: true`, without re-running the alarm rules;
+- the HTTP route answers 201 when a reading was stored and 200 when it was a replay;
+- `tank_readings.idempotencyKey` is now `NOT NULL` and unique per
+  `(tenantId, idempotencyKey)` (migration `0002_idempotency_key`). The unique moved from
+  `(deviceId, idempotencyKey)` because PostgreSQL treats NULL as distinct, so the old index
+  could not protect a manual dip recorded without a device.
+
+Tests: `packages/core/test/idempotency.test.ts`, the `ingest idempotency` block in
+`packages/core/test/ingest-service.test.ts`, the `reading ingestion idempotency` block in
+`packages/api/test/api.test.ts`, and `prisma/test/idempotency-migration.test.ts`, which
+applies both migrations to real PostgreSQL.

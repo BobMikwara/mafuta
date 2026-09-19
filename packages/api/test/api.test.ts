@@ -422,3 +422,94 @@ describe('reading ingest', () => {
     expect(invalid.statusCode).toBe(400);
   });
 });
+
+describe('reading ingestion idempotency', () => {
+  let harness: TestHarness;
+
+  beforeEach(async () => {
+    harness = await createHarness();
+    await harness.app.inject({
+      method: 'POST',
+      url: '/v1/sites',
+      headers: bearer(harness.keyForTenantA),
+      payload: SITE_PAYLOAD,
+    });
+    const created = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/tanks',
+      headers: bearer(harness.keyForTenantA),
+      payload: TANK_PAYLOAD,
+    });
+    tankId = (created.json() as { tank: { id: string } }).tank.id;
+  });
+
+  afterEach(async () => {
+    await harness.close();
+  });
+
+  let tankId = '';
+
+  async function submit(payload: Record<string, unknown>, key = harness.keyForTenantA) {
+    return harness.app.inject({
+      method: 'POST',
+      url: `/v1/tanks/${tankId}/readings`,
+      headers: bearer(key),
+      payload,
+    });
+  }
+
+  it('returns 200 with the original reading when a device retries an upload', async () => {
+    const payload = readingPayload({ deviceId: 'probe-1' });
+    const first = await submit(payload);
+    const retry = await submit(payload);
+
+    expect(first.statusCode).toBe(201);
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json().duplicate).toBe(true);
+    expect(retry.json().reading.id).toBe(first.json().reading.id);
+
+    const listed = await harness.app.inject({
+      method: 'GET',
+      url: `/v1/tanks/${tankId}/readings?limit=50`,
+      headers: bearer(harness.keyForTenantA),
+    });
+    expect(listed.json().readings).toHaveLength(1);
+  });
+
+  it('creates a new reading when the observation time differs', async () => {
+    const first = await submit(readingPayload({ observedAt: '2026-01-01T00:00:00.000Z' }));
+    const second = await submit(readingPayload({ observedAt: '2026-01-01T00:05:00.000Z' }));
+
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(201);
+    expect(second.json().reading.id).not.toBe(first.json().reading.id);
+  });
+
+  it('accepts and honours a client supplied idempotency key', async () => {
+    const first = await submit(readingPayload({ idempotencyKey: 'probe-1:000931' }));
+    const retry = await submit(
+      readingPayload({ idempotencyKey: 'probe-1:000931', observedAt: '2026-01-01T00:07:00.000Z' }),
+    );
+
+    expect(first.statusCode).toBe(201);
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json().reading.idempotencyKey).toBe('probe-1:000931');
+  });
+
+  it('does not let another tenant reuse a submission key', async () => {
+    const payload = readingPayload();
+    const first = await submit(payload);
+    const otherTenant = await submit(payload, harness.keyForTenantB);
+
+    // Tenant B has no tank with this id, so the upload is rejected as unknown
+    // rather than collapsing onto tenant A's reading.
+    expect(first.statusCode).toBe(201);
+    expect(otherTenant.statusCode).toBe(404);
+  });
+
+  it('rejects a malformed idempotency key', async () => {
+    const response = await submit(readingPayload({ idempotencyKey: 'bad key' }));
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe('validation_failed');
+  });
+});

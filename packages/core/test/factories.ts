@@ -74,6 +74,7 @@ export function makeReading(overrides: Partial<TankReading> = {}): TankReading {
     source: 'device' as ReadingSource,
     quality: 'ok' as ReadingQuality,
     deviceId: null,
+    idempotencyKey: 'idem-factory-default',
     ...overrides,
   };
 }
