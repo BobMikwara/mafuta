@@ -1,0 +1,38 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "buildCommand": "npm run db:generate && npm run build",
+  "outputDirectory": "apps/web/dist",
+  "installCommand": "npm ci",
+  "framework": "vite",
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "apps/api-server/public/**"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/healthz",
+      "destination": "/api"
+    },
+    {
+      "source": "/v1/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/public/(.*)",
+      "destination": "/api"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ]
+}

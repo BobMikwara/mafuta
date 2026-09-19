@@ -2,6 +2,8 @@ import {
   createLogger,
   createMemoryApiKeyRegistry,
   createMemoryRepositories,
+  createPrismaApiKeyRegistry,
+  createPrismaRepositories,
   createStdioSink,
   FleetService,
   generateApiKey,
@@ -9,6 +11,7 @@ import {
   IngestService,
   systemClock,
   type ApiKeyRecord,
+  type ApiKeyRegistry,
   type Clock,
   type FleetService as FleetServiceType,
   type IngestService as IngestServiceType,
@@ -48,7 +51,21 @@ export interface PlatformDependenciesOptions {
   readonly clock?: Clock;
   readonly logger?: Logger;
   readonly repositories?: Repositories;
+  readonly apiKeys?: ApiKeyRegistry;
   readonly minLogLevel?: LogLevel;
+  readonly usePrisma?: boolean;
+}
+
+function shouldUsePrisma(explicit?: boolean): boolean {
+  if (explicit !== undefined) return explicit;
+  if (process.env['USE_PRISMA'] === 'true') return true;
+  if (process.env['DATABASE_URL']?.includes('supabase')) return true;
+  if (process.env['DATABASE_URL']?.startsWith('postgresql://')) {
+    // If DATABASE_URL is set and not the local docker default, prefer Prisma in production
+    const isLocalDocker = process.env['DATABASE_URL']?.includes('localhost:5432') && process.env['DATABASE_URL']?.includes('fueltrack_dev');
+    if (!isLocalDocker && process.env['NODE_ENV'] === 'production') return true;
+  }
+  return false;
 }
 
 /**
@@ -66,8 +83,30 @@ export function createPlatformDependencies(
       sink: createStdioSink(),
       ...(options.minLogLevel === undefined ? {} : { minLevel: options.minLogLevel }),
     });
-  const repositories = options.repositories ?? createMemoryRepositories();
-  const apiKeys = createMemoryApiKeyRegistry({ clock: () => clock.now() });
+  const usePrisma = shouldUsePrisma(options.usePrisma);
+
+  let repositories: Repositories;
+  let apiKeys: ApiKeyRegistry;
+
+  if (options.repositories) {
+    repositories = options.repositories;
+  } else {
+    repositories = usePrisma ? createPrismaRepositories() : createMemoryRepositories();
+  }
+
+  if (options.apiKeys) {
+    apiKeys = options.apiKeys;
+  } else {
+    apiKeys = usePrisma
+      ? createPrismaApiKeyRegistry({ clock: () => clock.now() })
+      : createMemoryApiKeyRegistry({ clock: () => clock.now() });
+  }
+
+  if (usePrisma) {
+    logger.info('persistence.prisma.enabled', { reason: 'DATABASE_URL or USE_PRISMA' });
+  } else {
+    logger.info('persistence.memory.enabled', { reason: 'default for dev/test' });
+  }
 
   return {
     clock,
