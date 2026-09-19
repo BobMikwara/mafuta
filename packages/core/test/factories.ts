@@ -1,4 +1,5 @@
 import { DEFAULT_TANK_THRESHOLDS, type Tank, type TankThresholds } from '../src/domain/tank.js';
+import type { Alarm } from '../src/domain/alarm.js';
 import type { Site } from '../src/domain/site.js';
 import type { TankReading } from '../src/domain/reading.js';
 import type { ReadingQuality, ReadingSource } from '../src/domain/reading.js';
@@ -75,6 +76,23 @@ export function makeReading(overrides: Partial<TankReading> = {}): TankReading {
     quality: 'ok' as ReadingQuality,
     deviceId: null,
     idempotencyKey: 'idem-factory-default',
+    ...overrides,
+  };
+}
+
+export function makeAlarm(overrides: Partial<Alarm> = {}): Alarm {
+  return {
+    id: toAlarmId('alarm-1'),
+    tenantId: TENANT_A,
+    tankId: toTankId('tank-1'),
+    type: 'low-level',
+    severity: 'warning',
+    status: 'open',
+    message: 'Low level',
+    raisedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    readingId: null,
+    metrics: {},
     ...overrides,
   };
 }

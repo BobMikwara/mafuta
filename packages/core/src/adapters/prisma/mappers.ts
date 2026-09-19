@@ -4,6 +4,23 @@ import type { TankReading } from '../../domain/reading.js';
 import type { Alarm, AlarmType } from '../../domain/alarm.js';
 import type { SiteId, TankId, TenantId, ReadingId, AlarmId } from '../../types/ids.js';
 
+// -------------------- JSON columns --------------------
+
+/**
+ * Values accepted by a Prisma `Json` column.
+ *
+ * Prisma declares JSON input as an index-signature based type, and interfaces
+ * do not receive implicit index signatures, so domain objects (geometry,
+ * alarm metrics) are copied into plain literals that satisfy this shape. The
+ * mapping is explicit rather than a cast so a widening of the domain types is
+ * caught at compile time instead of at the database boundary.
+ */
+export type JsonInputValue = string | number | boolean | JsonInputObject | JsonInputArray;
+
+export type JsonInputArray = ReadonlyArray<JsonInputValue | null>;
+
+export type JsonInputObject = { readonly [key: string]: JsonInputValue | null };
+
 // -------------------- Site <-> Station --------------------
 
 export function toPrismaStationStatus(status: Site['status']): 'active' | 'inactive' {
@@ -120,7 +137,11 @@ export function toDomainTank(row: {
     siteId: row.stationId as SiteId,
     name: row.name,
     product: toDomainFuelProduct(row.product),
-    geometry: (row.geometry as Tank['geometry']) ?? { kind: 'vertical-cylinder', diameterMm: 2000, heightMm: 3000 },
+    geometry: (row.geometry as Tank['geometry']) ?? {
+      kind: 'vertical-cylinder',
+      diameterMm: 2000,
+      heightMm: 3000,
+    },
     capacityLitres: toNum(row.capacityLitres),
     thresholds: {
       criticalLowPercent: toNum(row.criticalLowPercent),
@@ -138,6 +159,31 @@ export function toDomainTank(row: {
   };
 }
 
+export function toPrismaGeometry(geometry: Tank['geometry']): JsonInputValue {
+  switch (geometry.kind) {
+    case 'vertical-cylinder':
+      return {
+        kind: geometry.kind,
+        diameterMm: geometry.diameterMm,
+        heightMm: geometry.heightMm,
+      };
+    case 'horizontal-cylinder':
+      return {
+        kind: geometry.kind,
+        diameterMm: geometry.diameterMm,
+        lengthMm: geometry.lengthMm,
+      };
+    case 'strapping-table':
+      return {
+        kind: geometry.kind,
+        points: geometry.points.map((point) => ({
+          levelMm: point.levelMm,
+          volumeLitres: point.volumeLitres,
+        })),
+      };
+  }
+}
+
 export function toPrismaTankInput(tank: Tank): {
   id: string;
   tenantId: string;
@@ -145,7 +191,7 @@ export function toPrismaTankInput(tank: Tank): {
   name: string;
   product: FuelProductPrisma;
   capacityLitres: number;
-  geometry: unknown;
+  geometry: JsonInputValue;
   criticalLowPercent: number;
   lowPercent: number;
   highPercent: number;
@@ -163,7 +209,7 @@ export function toPrismaTankInput(tank: Tank): {
     name: tank.name,
     product: toPrismaFuelProduct(tank.product),
     capacityLitres: tank.capacityLitres,
-    geometry: tank.geometry as unknown,
+    geometry: toPrismaGeometry(tank.geometry),
     criticalLowPercent: tank.thresholds.criticalLowPercent,
     lowPercent: tank.thresholds.lowPercent,
     highPercent: tank.thresholds.highPercent,
@@ -276,7 +322,22 @@ export function toPrismaReadingInput(reading: TankReading): {
 
 // -------------------- Alarm --------------------
 
-const ALARM_TO_ALERT: Record<AlarmType, string> = {
+/** Alert enums as declared by the Prisma schema. */
+export type AlertTypePrisma =
+  | 'low_stock'
+  | 'critical_stock'
+  | 'device_offline'
+  | 'stale_data'
+  | 'probe_quality'
+  | 'candidate_delivery'
+  | 'candidate_unexplained_decrease'
+  | 'water_level';
+
+export type AlertSeverityPrisma = 'info' | 'warning' | 'critical';
+
+export type AlertStatusPrisma = 'open' | 'acknowledged' | 'resolved';
+
+const ALARM_TO_ALERT: Record<AlarmType, AlertTypePrisma> = {
   'critical-low-level': 'critical_stock',
   'low-level': 'low_stock',
   'high-level': 'low_stock',
@@ -298,8 +359,8 @@ const ALERT_TO_ALARM: Record<string, AlarmType> = {
   water_level: 'water-ingress',
 };
 
-export function toPrismaAlertType(type: AlarmType): string {
-  return ALARM_TO_ALERT[type] ?? 'low_stock';
+export function toPrismaAlertType(type: AlarmType): AlertTypePrisma {
+  return ALARM_TO_ALERT[type];
 }
 
 export function toDomainAlarmType(type: string): AlarmType {
@@ -350,14 +411,17 @@ export function toPrismaAlertInput(alarm: Alarm): {
   id: string;
   tenantId: string;
   tankId: string | null;
-  type: string;
-  severity: string;
-  status: string;
+  type: AlertTypePrisma;
+  severity: AlertSeverityPrisma;
+  status: AlertStatusPrisma;
   message: string;
-  metrics: unknown;
+  metrics: JsonInputObject;
   raisedAt: Date;
 } {
-  const metrics: Record<string, unknown> = { ...alarm.metrics };
+  // Metrics are assembled as a mutable record because the reading reference is
+  // only added when the alarm carries one. The value is handed to Prisma as a
+  // JSON object, so the mutable record is a superset of the accepted type.
+  const metrics: Record<string, JsonInputValue | null> = { ...alarm.metrics };
   if (alarm.readingId) {
     metrics._readingId = alarm.readingId;
   }

@@ -59,7 +59,8 @@ export function createPrismaApiKeyRegistry(options?: { clock?: () => Date }): Ap
         update: {
           name: record.name,
           keyHash: record.keyHash,
-          scopes: record.scopes,
+          // Domain scopes are readonly; Prisma scalar lists are mutable arrays.
+          scopes: [...record.scopes],
           status: record.status,
           expiresAt: record.expiresAt ? new Date(record.expiresAt) : null,
           lastUsedAt: record.lastUsedAt ? new Date(record.lastUsedAt) : null,
@@ -69,7 +70,7 @@ export function createPrismaApiKeyRegistry(options?: { clock?: () => Date }): Ap
           tenantId: record.tenantId,
           name: record.name,
           keyHash: record.keyHash,
-          scopes: record.scopes,
+          scopes: [...record.scopes],
           status: record.status,
           createdAt: new Date(record.createdAt),
           expiresAt: record.expiresAt ? new Date(record.expiresAt) : null,
