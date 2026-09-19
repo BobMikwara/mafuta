@@ -173,9 +173,28 @@ model Tenant {
   events     FuelEvent[]
   alerts     Alert[]
   auditLogs  AuditLog[]
+  apiKeys    ApiKey[]
 
   @@index([status, createdAt])
   @@map("tenants")
+}
+
+model ApiKey {
+  id         String    @id
+  tenantId   String
+  name       String
+  keyHash    String    @unique
+  scopes     String[]
+  status     String    @default("active")
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  expiresAt  DateTime? @db.Timestamptz(3)
+  lastUsedAt DateTime? @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("api_keys")
 }
 
 model User {

@@ -1,10 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "buildCommand": "npm run build",
-  "outputDirectory": "apps/api-server/public",
+  "buildCommand": "npm run db:generate && npm run build",
+  "outputDirectory": "apps/web/dist",
   "installCommand": "npm ci",
-  "framework": null,
+  "framework": "vite",
   "functions": {
     "api/index.ts": {
       "includeFiles": "apps/api-server/public/**"
@@ -22,15 +22,11 @@
     {
       "source": "/public/(.*)",
       "destination": "/api"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/api"
     }
   ],
   "headers": [
     {
-      "source": "/public/(.*)",
+      "source": "/assets/(.*)",
       "headers": [
         {
           "key": "Cache-Control",

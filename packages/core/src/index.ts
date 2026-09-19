@@ -33,6 +33,9 @@ export * from './services/fleet-service.js';
 
 export * from './adapters/memory/memory-repositories.js';
 export * from './adapters/memory/memory-api-key-registry.js';
+export * from './adapters/prisma/client.js';
+export * from './adapters/prisma/prisma-repositories.js';
+export * from './adapters/prisma/prisma-api-key-registry.js';
 
 export * from './simulator/rng.js';
 export * from './simulator/scenarios.js';

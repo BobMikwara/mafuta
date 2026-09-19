@@ -13,7 +13,7 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build -w @fueltrack/core -w @fueltrack/api -w @fueltrack/api-server -w @fueltrack/simulator-runner",
+    "build": "npm run build -w @fueltrack/core -w @fueltrack/api -w @fueltrack/api-server -w @fueltrack/simulator-runner -w @fueltrack/web",
     "typecheck": "tsc -p tsconfig.json --pretty",
     "test": "vitest run",
     "test:watch": "vitest",

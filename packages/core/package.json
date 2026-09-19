@@ -19,6 +19,7 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@prisma/client": "^6.19.3",
     "zod": "^3.25.76"
   }
 }
