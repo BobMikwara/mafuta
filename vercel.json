@@ -1,0 +1,42 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": "apps/api-server/public",
+  "installCommand": "npm ci",
+  "framework": null,
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "apps/api-server/public/**"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/healthz",
+      "destination": "/api"
+    },
+    {
+      "source": "/v1/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/public/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/api"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/public/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ]
+}
