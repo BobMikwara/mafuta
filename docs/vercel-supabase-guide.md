@@ -179,6 +179,7 @@ node apps/simulator-runner/dist/index.js --api-url http://localhost:3000 --api-k
 
 - `No Output Directory named "build"` -> fixed by `vercel.json` outputDirectory `apps/web/dist`
 - `prisma generate` fails in Vercel -> ensure `buildCommand` includes it, and `@prisma/client` in dependencies
+- `Missing script: "db:generate"` with npm error location `packages/api` -> the Vercel Root Directory is set to `packages/api`. Clear it in Project Settings > General > Root Directory so the build runs from the repo root, where `db:generate` and the workspace build live. Root Directory cannot be set in `vercel.json`, it is a dashboard-only setting.
 - `Can't reach database` on Vercel -> use pooled 6543 URL with `?pgbouncer=true`, not direct 5432 for app
 - In-memory data lost on Vercel -> set `USE_PRISMA=true` and `DATABASE_URL`
 - CORS errors -> set `VITE_API_URL` to backend URL or use relative URLs when frontend and backend same Vercel project
