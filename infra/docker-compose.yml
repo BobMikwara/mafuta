@@ -1,0 +1,56 @@
+# Local development infrastructure for FuelTrack EA.
+#
+# Start a PostgreSQL instance for local development and integration tests:
+#   docker compose -f infra/docker-compose.yml up -d
+#   export DATABASE_URL="postgresql://fueltrack:fueltrack@localhost:5432/fueltrack_dev?schema=public"
+#
+# This file is for local development only. Do not use these credentials
+# anywhere else, and never point a deployed environment at this container.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fueltrack-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fueltrack
+      POSTGRES_PASSWORD: fueltrack
+      POSTGRES_DB: fueltrack_dev
+    ports:
+      - '5432:5432'
+    volumes:
+      - fueltrack-pgdata:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - max_connections=50
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U fueltrack -d fueltrack_dev']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Shadow database used by Prisma to detect schema drift.
+  postgres-shadow:
+    image: postgres:16-alpine
+    container_name: fueltrack-postgres-shadow
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fueltrack
+      POSTGRES_PASSWORD: fueltrack
+      POSTGRES_DB: fueltrack_shadow
+    ports:
+      - '5433:5432'
+    volumes:
+      - fueltrack-pgdata-shadow:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U fueltrack -d fueltrack_shadow']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  fueltrack-pgdata:
+  fueltrack-pgdata-shadow:

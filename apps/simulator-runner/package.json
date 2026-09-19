@@ -1,0 +1,19 @@
+{
+  "name": "@fueltrack/simulator-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CLI that drives the SIMULATED tank gauge adapter against a running FuelTrack API",
+  "bin": {
+    "fueltrack-simulator": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@fueltrack/core": "*"
+  }
+}

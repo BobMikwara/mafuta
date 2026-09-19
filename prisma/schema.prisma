@@ -1,0 +1,493 @@
+// FuelTrack EA data model.
+//
+// Rules applied from TRD sections 3 and 4:
+//   - Timestamps are timestamptz and stored in UTC.
+//   - Litres, millimetres and degrees use decimal, never binary floating point.
+//   - recorded_at and received_at are both retained on readings.
+//   - Raw device payloads are immutable and access is restricted.
+//   - Idempotency is enforced with a unique key per device.
+//   - Indexes follow the stated query patterns: tank_id + recorded_at and
+//     tenant_id + created_at.
+//   - Operational entities use lifecycle status instead of hard deletion.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  active
+  suspended
+}
+
+enum UserRole {
+  platform_admin
+  company_admin
+  station_manager
+  station_operator
+  auditor
+}
+
+enum UserStatus {
+  invited
+  active
+  suspended
+}
+
+enum StationStatus {
+  active
+  inactive
+}
+
+enum TankStatus {
+  active
+  decommissioned
+}
+
+enum FuelProduct {
+  diesel
+  petrol_91
+  petrol_95
+  kerosene
+  adblue
+}
+
+enum DeviceProtocol {
+  simulated
+  http
+  mqtt
+  modbus_rtu
+  modbus_tcp
+  other
+}
+
+enum DeviceStatus {
+  registered
+  active
+  maintenance
+  retired
+}
+
+enum DeviceConnectionState {
+  online
+  offline
+  degraded
+}
+
+enum AssignmentStatus {
+  active
+  ended
+}
+
+/// How a value was obtained. Required by PRD goal: distinguish measured,
+/// recorded, estimated and inferred values.
+enum Provenance {
+  measured
+  recorded
+  estimated
+  inferred
+  manual
+}
+
+/// Validity of a reading as judged by validation and plausibility rules.
+enum QualityStatus {
+  ok
+  suspect
+  invalid
+}
+
+/// Computed freshness. Stored when a reading is written, recomputed on read.
+enum FreshnessStatus {
+  fresh
+  delayed
+  stale
+}
+
+enum SourceProtocol {
+  simulated
+  http
+  mqtt
+  manual
+}
+
+enum FuelEventType {
+  candidate_delivery
+  candidate_unexplained_decrease
+}
+
+enum FuelEventStatus {
+  candidate
+  confirmed
+  rejected
+}
+
+enum AlertType {
+  low_stock
+  critical_stock
+  device_offline
+  stale_data
+  probe_quality
+  candidate_delivery
+  candidate_unexplained_decrease
+  water_level
+}
+
+enum AlertSeverity {
+  info
+  warning
+  critical
+}
+
+enum AlertStatus {
+  open
+  acknowledged
+  resolved
+}
+
+enum ActorType {
+  user
+  device
+  system
+}
+
+model Tenant {
+  id        String       @id
+  name      String
+  slug      String       @unique
+  status    TenantStatus @default(active)
+  country   String       @default("TZ")
+  timezone  String       @default("Africa/Dar_es_Salaam")
+  createdAt DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime     @updatedAt @db.Timestamptz(3)
+
+  users      User[]
+  stations   Station[]
+  tanks      Tank[]
+  devices    Device[]
+  readings   TankReading[]
+  rawMessages RawDeviceMessage[]
+  events     FuelEvent[]
+  alerts     Alert[]
+  auditLogs  AuditLog[]
+
+  @@index([status, createdAt])
+  @@map("tenants")
+}
+
+model User {
+  id           String     @id
+  tenantId     String
+  email        String
+  fullName     String
+  passwordHash String
+  role         UserRole   @default(station_operator)
+  status       UserStatus @default(invited)
+  /// MFA readiness. Secret material is never stored in this table.
+  mfaEnabled   Boolean    @default(false)
+  lastLoginAt  DateTime?  @db.Timestamptz(3)
+  createdAt    DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime   @updatedAt @db.Timestamptz(3)
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignments UserStationScope[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId, createdAt])
+  @@map("users")
+}
+
+/// Station level permissions, required by PRD tenant and access management.
+model UserStationScope {
+  id        String   @id
+  tenantId  String
+  userId    String
+  stationId String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  station Station @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, stationId])
+  @@index([tenantId, stationId])
+  @@map("user_station_scopes")
+}
+
+model Station {
+  id        String        @id
+  tenantId  String
+  name      String
+  code      String
+  timezone  String        @default("Africa/Dar_es_Salaam")
+  status    StationStatus @default(active)
+  createdAt DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime      @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tanks  Tank[]
+  scopes UserStationScope[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, createdAt])
+  @@map("stations")
+}
+
+model Tank {
+  id       String      @id
+  tenantId String
+  stationId String
+  name     String
+  product  FuelProduct
+  status   TankStatus  @default(active)
+
+  /// Safe working capacity in litres. Never exceeds geometric capacity.
+  capacityLitres Decimal @db.Decimal(14, 3)
+
+  /// Shape and dimensions, or a vendor strapping table. Stored as documented
+  /// JSON because the shape varies per tank and per calibration certificate.
+  geometry Json
+
+  /// Calibration metadata. Recorded, never presented as validated.
+  calibrationSource String?
+  calibrationAt     DateTime? @db.Timestamptz(3)
+  strappingTable    Json?
+
+  /// Thresholds as a percentage of usable capacity.
+  criticalLowPercent Decimal @default(10) @db.Decimal(5, 2)
+  lowPercent         Decimal @default(20) @db.Decimal(5, 2)
+  highPercent        Decimal @default(95) @db.Decimal(5, 2)
+  waterAlarmMm       Decimal @default(50) @db.Decimal(10, 2)
+  /// Litres per hour above which a decrease is flagged for investigation.
+  unexplainedDecreaseLitresPerHour Decimal @default(400) @db.Decimal(12, 3)
+  /// Minimum sustained rise treated as a delivery candidate.
+  deliveryMinLitres     Decimal @default(300) @db.Decimal(14, 3)
+  deliveryWindowMinutes Int     @default(30)
+  /// Readings older than this are stale, never shown as live.
+  staleAfterMinutes     Int     @default(60)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  station        Station            @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  assignments    DeviceAssignment[]
+  readings       TankReading[]
+  events         FuelEvent[]
+  alerts         Alert[]
+
+  @@index([tenantId, createdAt])
+  @@index([stationId, status])
+  @@map("tanks")
+}
+
+model Device {
+  id            String                @id
+  tenantId      String
+  manufacturer  String
+  model         String
+  serialNumber  String
+  protocol      DeviceProtocol        @default(other)
+  firmwareVersion String?
+  status        DeviceStatus          @default(registered)
+  connectionState DeviceConnectionState @default(offline)
+  lastSeenAt    DateTime?             @db.Timestamptz(3)
+  /// Non-secret credential reference. The secret itself is hashed separately.
+  credentialRef String?
+  createdAt     DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime              @updatedAt @db.Timestamptz(3)
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignments DeviceAssignment[]
+  readings    TankReading[]
+  rawMessages RawDeviceMessage[]
+
+  @@unique([tenantId, serialNumber])
+  @@index([tenantId, createdAt])
+  @@index([connectionState, lastSeenAt])
+  @@map("devices")
+}
+
+model DeviceAssignment {
+  id           String           @id
+  tenantId     String
+  deviceId     String
+  tankId       String
+  status       AssignmentStatus @default(active)
+  assignedAt   DateTime         @default(now()) @db.Timestamptz(3)
+  unassignedAt DateTime?        @db.Timestamptz(3)
+  createdAt    DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime         @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  tank   Tank   @relation(fields: [tankId], references: [id], onDelete: Cascade)
+
+  @@index([tankId, status])
+  @@index([deviceId, status])
+  @@index([tenantId, createdAt])
+  @@map("device_assignments")
+}
+
+model TankReading {
+  id       String @id
+  tenantId String
+  tankId   String
+  deviceId String?
+
+  /// Device timestamp, preserved exactly as the device reported it.
+  recordedAt DateTime @db.Timestamptz(3)
+  /// Server receipt timestamp.
+  receivedAt DateTime @db.Timestamptz(3)
+
+  levelMm       Decimal  @db.Decimal(10, 2)
+  waterLevelMm  Decimal? @db.Decimal(10, 2)
+  volumeLitres  Decimal  @db.Decimal(14, 3)
+  temperatureC  Decimal? @db.Decimal(5, 2)
+
+  provenance     Provenance      @default(measured)
+  qualityStatus  QualityStatus   @default(ok)
+  freshnessStatus FreshnessStatus @default(fresh)
+  sourceProtocol SourceProtocol  @default(http)
+
+  /// Client supplied idempotency key, unique per device. Duplicate submissions
+  /// return the original reading instead of creating a second row.
+  idempotencyKey String?
+  /// Reference to the retained raw payload, which is access restricted.
+  rawMessageId   String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tank   Tank   @relation(fields: [tankId], references: [id], onDelete: Cascade)
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@unique([deviceId, idempotencyKey])
+  @@index([tankId, recordedAt])
+  @@index([tenantId, createdAt])
+  @@index([tankId, qualityStatus, recordedAt])
+  @@map("tank_readings")
+}
+
+/// Immutable device payloads. Access is restricted to the raw:read scope and
+/// is always audit logged.
+model RawDeviceMessage {
+  id        String         @id
+  tenantId  String
+  deviceId  String?
+  protocol  SourceProtocol @default(http)
+  payload   Json
+  /// Stable fingerprint used for deduplication before normalization.
+  messageHash String
+  receivedAt  DateTime     @default(now()) @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, messageHash])
+  @@index([tenantId, receivedAt])
+  @@map("raw_device_messages")
+}
+
+model FuelEvent {
+  id        String          @id
+  tenantId  String
+  tankId    String
+  type      FuelEventType
+  status    FuelEventStatus @default(candidate)
+
+  /// 0 to 1. Explainable confidence, never presented as certainty.
+  confidence Decimal @db.Decimal(4, 3)
+  /// Signed volume change in litres that triggered the candidate.
+  volumeChangeLitres Decimal @db.Decimal(14, 3)
+  windowStart DateTime @db.Timestamptz(3)
+  windowEnd   DateTime @db.Timestamptz(3)
+
+  /// Structured evidence: the readings and rules that produced the candidate.
+  evidence Json
+
+  notes          String?
+  decidedByUserId String?
+  decidedAt      DateTime? @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tank     Tank     @relation(fields: [tankId], references: [id], onDelete: Cascade)
+  deliveries Delivery[]
+
+  @@index([tenantId, createdAt])
+  @@index([tankId, status, windowStart])
+  @@map("fuel_events")
+}
+
+/// Created only when a human confirms a delivery candidate.
+model Delivery {
+  id            String   @id
+  tenantId      String
+  tankId        String
+  fuelEventId   String?
+  volumeLitres  Decimal  @db.Decimal(14, 3)
+  reference     String?
+  confirmedByUserId String
+  confirmedAt   DateTime @default(now()) @db.Timestamptz(3)
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tank      Tank       @relation(fields: [tankId], references: [id], onDelete: Cascade)
+  fuelEvent FuelEvent? @relation(fields: [fuelEventId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, confirmedAt])
+  @@index([tankId, confirmedAt])
+  @@map("deliveries")
+}
+
+model Alert {
+  id       String        @id
+  tenantId String
+  tankId   String?
+  type     AlertType
+  severity AlertSeverity
+  status   AlertStatus   @default(open)
+  message  String
+  /// Numeric evidence attached to the alert for audit and tuning.
+  metrics  Json          @default("{}")
+
+  raisedAt       DateTime  @default(now()) @db.Timestamptz(3)
+  acknowledgedAt DateTime? @db.Timestamptz(3)
+  acknowledgedByUserId String?
+  assignedToUserId String?
+  resolvedAt     DateTime? @db.Timestamptz(3)
+  resolvedByUserId String?
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tank   Tank?  @relation(fields: [tankId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status, raisedAt])
+  @@index([tankId, status])
+  @@map("alerts")
+}
+
+model AuditLog {
+  id           String    @id
+  tenantId     String?
+  actorType    ActorType
+  actorUserId  String?
+  actorDeviceId String?
+  action       String
+  resourceType String
+  resourceId   String?
+  /// Hashed client IP, never the raw address.
+  ipHash       String?
+  metadata     Json      @default("{}")
+  occurredAt   DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, occurredAt])
+  @@index([resourceType, resourceId])
+  @@map("audit_logs")
+}
