@@ -8,23 +8,22 @@ tenant-isolated HTTP API, deterministic tank simulator, and a rule-based alarm e
 Foundation phase. Working, tested, and runnable locally. **Not production ready**:
 persistence is in-memory, there is no rate limiting, and no hardware adapter exists yet.
 
-| Area                                        | State                                      |
-| ------------------------------------------- | ------------------------------------------ |
-| Domain model and geometry maths             | Done, tested                               |
-| Tank simulator (deterministic, 7 scenarios) | Done, tested                               |
-| Alarm rules engine                          | Done, tested                               |
-| Tenant isolation (repositories and HTTP)    | Done, tested with cross-tenant cases       |
-| Validation of all external input            | Done, tested                               |
-| API key authentication and scopes           | Done, tested                               |
-| HTTP API (Fastify)                          | Done, tested                               |
-| Simulator runner CLI                        | Done, tested                               |
-| Dashboard                                   | Read-only, development use                 |
-| Durable persistence                         | Not started, ports are ready               |
-| Hardware gauge adapter                      | Blocked, waiting on protocol documentation |
-| Rate limiting                               | Not started                                |
-
-| Prisma schema and migrations | Done, migration verified against PostgreSQL 18 |
-| Domain model aligned to TRD section 3 | Schema done, code partially aligned, see below |
+| Area                                        | State                                                |
+| ------------------------------------------- | ---------------------------------------------------- |
+| Domain model and geometry maths             | Done, tested                                         |
+| Tank simulator (deterministic, 7 scenarios) | Done, tested                                         |
+| Alarm rules engine                          | Done, tested                                         |
+| Tenant isolation (repositories and HTTP)    | Done, tested with cross-tenant cases                 |
+| Validation of all external input            | Done, tested                                         |
+| API key authentication and scopes           | Done, tested                                         |
+| Idempotent ingestion                        | Done, tested in the service, HTTP and database       |
+| HTTP API (Fastify)                          | Done, tested                                         |
+| Simulator runner CLI                        | Done, tested                                         |
+| Dashboard                                   | Read-only, development use                           |
+| Prisma schema and migrations                | Done, both migrations verified against PostgreSQL 18 |
+| Durable persistence                         | Not started, ports are ready                         |
+| Hardware gauge adapter                      | Blocked, waiting on protocol documentation           |
+| Rate limiting                               | Not started                                          |
 
 ## Layout
 
@@ -53,6 +52,14 @@ npm run db:test      # migration tests, run against PostgreSQL with no server re
 ```
 
 See [prisma/README.md](prisma/README.md) for the change, rollback, and drift-check workflow.
+
+## Continuous integration
+
+The GitHub Actions definition lives at [docs/ci/github-actions-ci.yml](docs/ci/github-actions-ci.yml)
+rather than in `.github/workflows`, because the automation account that maintains this branch
+is not permitted to create or update workflow files. Copy it to `.github/workflows/ci.yml` to
+enable CI. It runs two jobs: `verify` (guardrails, typecheck, lint, format, coverage, build) and
+`database` (real PostgreSQL services for `db:validate`, `db:deploy`, `db:drift`, `db:test`).
 
 ## Specification alignment
 
