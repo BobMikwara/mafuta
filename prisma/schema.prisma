@@ -164,16 +164,18 @@ model Tenant {
   createdAt DateTime     @default(now()) @db.Timestamptz(3)
   updatedAt DateTime     @updatedAt @db.Timestamptz(3)
 
-  users      User[]
-  stations   Station[]
-  tanks      Tank[]
-  devices    Device[]
-  readings   TankReading[]
-  rawMessages RawDeviceMessage[]
-  events     FuelEvent[]
-  alerts     Alert[]
-  auditLogs  AuditLog[]
-  apiKeys    ApiKey[]
+  users             User[]
+  stations          Station[]
+  tanks             Tank[]
+  devices           Device[]
+  readings          TankReading[]
+  rawMessages       RawDeviceMessage[]
+  events            FuelEvent[]
+  alerts            Alert[]
+  auditLogs         AuditLog[]
+  apiKeys           ApiKey[]
+  deviceAssignments DeviceAssignment[]
+  deliveries        Delivery[]
 
   @@index([status, createdAt])
   @@map("tenants")
@@ -211,7 +213,7 @@ model User {
   createdAt    DateTime   @default(now()) @db.Timestamptz(3)
   updatedAt    DateTime   @updatedAt @db.Timestamptz(3)
 
-  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   assignments UserStationScope[]
 
   @@unique([tenantId, email])
@@ -245,7 +247,7 @@ model Station {
   createdAt DateTime      @default(now()) @db.Timestamptz(3)
   updatedAt DateTime      @updatedAt @db.Timestamptz(3)
 
-  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   tanks  Tank[]
   scopes UserStationScope[]
 
@@ -255,12 +257,12 @@ model Station {
 }
 
 model Tank {
-  id       String      @id
-  tenantId String
+  id        String      @id
+  tenantId  String
   stationId String
-  name     String
-  product  FuelProduct
-  status   TankStatus  @default(active)
+  name      String
+  product   FuelProduct
+  status    TankStatus  @default(active)
 
   /// Safe working capacity in litres. Never exceeds geometric capacity.
   capacityLitres Decimal @db.Decimal(14, 3)
@@ -275,27 +277,28 @@ model Tank {
   strappingTable    Json?
 
   /// Thresholds as a percentage of usable capacity.
-  criticalLowPercent Decimal @default(10) @db.Decimal(5, 2)
-  lowPercent         Decimal @default(20) @db.Decimal(5, 2)
-  highPercent        Decimal @default(95) @db.Decimal(5, 2)
-  waterAlarmMm       Decimal @default(50) @db.Decimal(10, 2)
+  criticalLowPercent               Decimal @default(10) @db.Decimal(5, 2)
+  lowPercent                       Decimal @default(20) @db.Decimal(5, 2)
+  highPercent                      Decimal @default(95) @db.Decimal(5, 2)
+  waterAlarmMm                     Decimal @default(50) @db.Decimal(10, 2)
   /// Litres per hour above which a decrease is flagged for investigation.
   unexplainedDecreaseLitresPerHour Decimal @default(400) @db.Decimal(12, 3)
   /// Minimum sustained rise treated as a delivery candidate.
-  deliveryMinLitres     Decimal @default(300) @db.Decimal(14, 3)
-  deliveryWindowMinutes Int     @default(30)
+  deliveryMinLitres                Decimal @default(300) @db.Decimal(14, 3)
+  deliveryWindowMinutes            Int     @default(30)
   /// Readings older than this are stale, never shown as live.
-  staleAfterMinutes     Int     @default(60)
+  staleAfterMinutes                Int     @default(60)
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
-  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  station        Station            @relation(fields: [stationId], references: [id], onDelete: Cascade)
-  assignments    DeviceAssignment[]
-  readings       TankReading[]
-  events         FuelEvent[]
-  alerts         Alert[]
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  station     Station            @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  assignments DeviceAssignment[]
+  readings    TankReading[]
+  events      FuelEvent[]
+  alerts      Alert[]
+  deliveries  Delivery[]
 
   @@index([tenantId, createdAt])
   @@index([stationId, status])
@@ -303,20 +306,20 @@ model Tank {
 }
 
 model Device {
-  id            String                @id
-  tenantId      String
-  manufacturer  String
-  model         String
-  serialNumber  String
-  protocol      DeviceProtocol        @default(other)
+  id              String                @id
+  tenantId        String
+  manufacturer    String
+  model           String
+  serialNumber    String
+  protocol        DeviceProtocol        @default(other)
   firmwareVersion String?
-  status        DeviceStatus          @default(registered)
+  status          DeviceStatus          @default(registered)
   connectionState DeviceConnectionState @default(offline)
-  lastSeenAt    DateTime?             @db.Timestamptz(3)
+  lastSeenAt      DateTime?             @db.Timestamptz(3)
   /// Non-secret credential reference. The secret itself is hashed separately.
-  credentialRef String?
-  createdAt     DateTime              @default(now()) @db.Timestamptz(3)
-  updatedAt     DateTime              @updatedAt @db.Timestamptz(3)
+  credentialRef   String?
+  createdAt       DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime              @updatedAt @db.Timestamptz(3)
 
   tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   assignments DeviceAssignment[]
@@ -351,7 +354,7 @@ model DeviceAssignment {
 }
 
 model TankReading {
-  id       String @id
+  id       String  @id
   tenantId String
   tankId   String
   deviceId String?
@@ -361,15 +364,15 @@ model TankReading {
   /// Server receipt timestamp.
   receivedAt DateTime @db.Timestamptz(3)
 
-  levelMm       Decimal  @db.Decimal(10, 2)
-  waterLevelMm  Decimal? @db.Decimal(10, 2)
-  volumeLitres  Decimal  @db.Decimal(14, 3)
-  temperatureC  Decimal? @db.Decimal(5, 2)
+  levelMm      Decimal  @db.Decimal(10, 2)
+  waterLevelMm Decimal? @db.Decimal(10, 2)
+  volumeLitres Decimal  @db.Decimal(14, 3)
+  temperatureC Decimal? @db.Decimal(5, 2)
 
-  provenance     Provenance      @default(measured)
-  qualityStatus  QualityStatus   @default(ok)
+  provenance      Provenance      @default(measured)
+  qualityStatus   QualityStatus   @default(ok)
   freshnessStatus FreshnessStatus @default(fresh)
-  sourceProtocol SourceProtocol  @default(http)
+  sourceProtocol  SourceProtocol  @default(http)
 
   /// Submission identity, unique per tenant. Supplied by the device, otherwise
   /// derived by the application from tenant, tank, device and observation time.
@@ -381,8 +384,8 @@ model TankReading {
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tank   Tank   @relation(fields: [tankId], references: [id], onDelete: Cascade)
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tank   Tank    @relation(fields: [tankId], references: [id], onDelete: Cascade)
   device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
 
   /// Scoped by tenant rather than device: PostgreSQL treats NULL as distinct,
@@ -399,16 +402,16 @@ model TankReading {
 /// Immutable device payloads. Access is restricted to the raw:read scope and
 /// is always audit logged.
 model RawDeviceMessage {
-  id        String         @id
-  tenantId  String
-  deviceId  String?
-  protocol  SourceProtocol @default(http)
-  payload   Json
+  id          String         @id
+  tenantId    String
+  deviceId    String?
+  protocol    SourceProtocol @default(http)
+  payload     Json
   /// Stable fingerprint used for deduplication before normalization.
   messageHash String
-  receivedAt  DateTime     @default(now()) @db.Timestamptz(3)
+  receivedAt  DateTime       @default(now()) @db.Timestamptz(3)
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, messageHash])
@@ -417,30 +420,30 @@ model RawDeviceMessage {
 }
 
 model FuelEvent {
-  id        String          @id
-  tenantId  String
-  tankId    String
-  type      FuelEventType
-  status    FuelEventStatus @default(candidate)
+  id       String          @id
+  tenantId String
+  tankId   String
+  type     FuelEventType
+  status   FuelEventStatus @default(candidate)
 
   /// 0 to 1. Explainable confidence, never presented as certainty.
-  confidence Decimal @db.Decimal(4, 3)
+  confidence         Decimal  @db.Decimal(4, 3)
   /// Signed volume change in litres that triggered the candidate.
-  volumeChangeLitres Decimal @db.Decimal(14, 3)
-  windowStart DateTime @db.Timestamptz(3)
-  windowEnd   DateTime @db.Timestamptz(3)
+  volumeChangeLitres Decimal  @db.Decimal(14, 3)
+  windowStart        DateTime @db.Timestamptz(3)
+  windowEnd          DateTime @db.Timestamptz(3)
 
   /// Structured evidence: the readings and rules that produced the candidate.
   evidence Json
 
-  notes          String?
+  notes           String?
   decidedByUserId String?
-  decidedAt      DateTime? @db.Timestamptz(3)
-  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
-  updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
+  decidedAt       DateTime? @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(3)
 
-  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tank     Tank     @relation(fields: [tankId], references: [id], onDelete: Cascade)
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tank       Tank       @relation(fields: [tankId], references: [id], onDelete: Cascade)
   deliveries Delivery[]
 
   @@index([tenantId, createdAt])
@@ -450,15 +453,15 @@ model FuelEvent {
 
 /// Created only when a human confirms a delivery candidate.
 model Delivery {
-  id            String   @id
-  tenantId      String
-  tankId        String
-  fuelEventId   String?
-  volumeLitres  Decimal  @db.Decimal(14, 3)
-  reference     String?
+  id                String   @id
+  tenantId          String
+  tankId            String
+  fuelEventId       String?
+  volumeLitres      Decimal  @db.Decimal(14, 3)
+  reference         String?
   confirmedByUserId String
-  confirmedAt   DateTime @default(now()) @db.Timestamptz(3)
-  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+  confirmedAt       DateTime @default(now()) @db.Timestamptz(3)
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
 
   tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   tank      Tank       @relation(fields: [tankId], references: [id], onDelete: Cascade)
@@ -480,13 +483,13 @@ model Alert {
   /// Numeric evidence attached to the alert for audit and tuning.
   metrics  Json          @default("{}")
 
-  raisedAt       DateTime  @default(now()) @db.Timestamptz(3)
-  acknowledgedAt DateTime? @db.Timestamptz(3)
+  raisedAt             DateTime  @default(now()) @db.Timestamptz(3)
+  acknowledgedAt       DateTime? @db.Timestamptz(3)
   acknowledgedByUserId String?
-  assignedToUserId String?
-  resolvedAt     DateTime? @db.Timestamptz(3)
-  resolvedByUserId String?
-  updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
+  assignedToUserId     String?
+  resolvedAt           DateTime? @db.Timestamptz(3)
+  resolvedByUserId     String?
+  updatedAt            DateTime  @updatedAt @db.Timestamptz(3)
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   tank   Tank?  @relation(fields: [tankId], references: [id], onDelete: Cascade)
@@ -497,18 +500,18 @@ model Alert {
 }
 
 model AuditLog {
-  id           String    @id
-  tenantId     String?
-  actorType    ActorType
-  actorUserId  String?
+  id            String    @id
+  tenantId      String?
+  actorType     ActorType
+  actorUserId   String?
   actorDeviceId String?
-  action       String
-  resourceType String
-  resourceId   String?
+  action        String
+  resourceType  String
+  resourceId    String?
   /// Hashed client IP, never the raw address.
-  ipHash       String?
-  metadata     Json      @default("{}")
-  occurredAt   DateTime  @default(now()) @db.Timestamptz(3)
+  ipHash        String?
+  metadata      Json      @default("{}")
+  occurredAt    DateTime  @default(now()) @db.Timestamptz(3)
 
   tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
