@@ -1,0 +1,48 @@
+{
+  "name": "fueltrack-ea",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FuelTrack EA multi-tenant fuel tank monitoring platform",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @fueltrack/core -w @fueltrack/api -w @fueltrack/api-server -w @fueltrack/simulator-runner",
+    "typecheck": "tsc -p tsconfig.json --pretty",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "guardrails": "node scripts/check-guardrails.mjs",
+    "db:generate": "prisma generate",
+    "db:validate": "prisma validate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:drift": "prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url \"$SHADOW_DATABASE_URL\" --exit-code",
+    "db:test": "vitest run prisma",
+    "check": "npm run guardrails && npm run typecheck && npm run lint && npm run format:check && npm run coverage"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@eslint/js": "^9.39.5",
+    "@prisma/client": "^6.19.3",
+    "@types/node": "^22.20.4",
+    "@vitest/coverage-v8": "^5.0.1",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.8",
+    "prisma": "^6.19.3",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.1"
+  }
+}

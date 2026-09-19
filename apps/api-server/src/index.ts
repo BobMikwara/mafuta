@@ -1,0 +1,111 @@
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { buildServer, createPlatformDependencies, type PlatformDependencies } from '@fueltrack/api';
+import {
+  API_KEY_SCOPES,
+  createSiteSchema,
+  createTankSchema,
+  parseInput,
+  systemClock,
+} from '@fueltrack/core';
+import { DEMO_SITE_ID, readConfig, type ApiServerConfig } from './config.js';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_DASHBOARD_DIR = join(here, '..', 'public');
+
+async function seedDemoData(
+  dependencies: PlatformDependencies,
+  config: ApiServerConfig,
+): Promise<void> {
+  const tenantId = config.demoTenantId;
+
+  await dependencies.fleetService.createSite(
+    tenantId,
+    parseInput(createSiteSchema, {
+      id: DEMO_SITE_ID,
+      name: 'Demo Depot',
+      timezone: 'Africa/Nairobi',
+    }),
+  );
+
+  await dependencies.fleetService.createTank(
+    tenantId,
+    parseInput(createTankSchema, {
+      siteId: DEMO_SITE_ID,
+      name: 'Diesel Tank 1',
+      product: 'diesel',
+      geometry: { kind: 'vertical-cylinder', diameterMm: 2500, heightMm: 4000 },
+      capacityLitres: 19_000,
+    }),
+  );
+
+  await dependencies.fleetService.createTank(
+    tenantId,
+    parseInput(createTankSchema, {
+      siteId: DEMO_SITE_ID,
+      name: 'Petrol 95 Tank 2',
+      product: 'petrol-95',
+      geometry: { kind: 'vertical-cylinder', diameterMm: 2200, heightMm: 3600 },
+      capacityLitres: 13_000,
+    }),
+  );
+
+  // The secret comes from the operator through FUELTRACK_DEV_API_KEY, so the
+  // developer who started the server is the only one who knows it.
+  const issued = await dependencies.issueApiKey({
+    tenantId,
+    name: 'local-development-key',
+    scopes: [...API_KEY_SCOPES],
+    ...(config.devApiKey === null ? {} : { secret: config.devApiKey }),
+  });
+
+  dependencies.logger.info('demo.seeded', {
+    tenantId,
+    siteId: DEMO_SITE_ID,
+    keyId: issued.record.id,
+    note: 'The seeded key secret was supplied by the operator and is never logged',
+  });
+}
+
+export async function main(): Promise<void> {
+  const config = readConfig();
+  const dependencies = createPlatformDependencies({
+    minLogLevel: config.minLogLevel,
+    clock: systemClock,
+  });
+
+  if (config.seedDemo) {
+    await seedDemoData(dependencies, config);
+  }
+
+  const dashboardDir = config.dashboardDir ?? DEFAULT_DASHBOARD_DIR;
+  const app = await buildServer(dependencies, {
+    requestLogging: config.requestLogging,
+    minLogLevel: config.minLogLevel,
+    dashboardDir,
+  });
+
+  const shutdown = async (signal: string): Promise<void> => {
+    dependencies.logger.info('server.shutdown.requested', { signal });
+    await app.close();
+    process.exit(0);
+  };
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+
+  await app.listen({ host: config.host, port: config.port });
+  dependencies.logger.info('server.listening', {
+    host: config.host,
+    port: config.port,
+    demoDataSeeded: config.seedDemo,
+    persistence: 'in-memory',
+  });
+}
+
+if (process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : 'unknown error';
+    process.stderr.write(`fueltrack-api-server failed to start: ${message}\n`);
+    process.exit(1);
+  });
+}

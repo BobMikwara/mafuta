@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FuelTrack EA Operations Console</title>
+    <link rel="stylesheet" href="/public/dashboard.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>FuelTrack EA</h1>
+      <p class="subtitle">Tank monitoring console (development build, in-memory persistence)</p>
+    </header>
+
+    <main>
+      <section class="panel" id="credentials">
+        <h2>Connection</h2>
+        <form id="credentials-form" autocomplete="off">
+          <label for="api-key">API key</label>
+          <input
+            id="api-key"
+            name="api-key"
+            type="password"
+            placeholder="Paste the API key issued for this tenant"
+            spellcheck="false"
+          />
+          <button id="connect" type="submit">Connect</button>
+          <button id="disconnect" type="button">Clear</button>
+        </form>
+        <p id="connection-status" class="status" role="status"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Tanks</h2>
+        <div class="table-scroll">
+          <table id="tanks-table">
+            <thead>
+              <tr>
+                <th>Tank</th>
+                <th>Product</th>
+                <th>Level</th>
+                <th>Net volume</th>
+                <th>Fill</th>
+                <th>Temperature</th>
+                <th>Water</th>
+                <th>Observed</th>
+              </tr>
+            </thead>
+            <tbody id="tanks-body">
+              <tr>
+                <td colspan="8" class="empty">No data loaded.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Open alarms</h2>
+        <ul id="alarms-list" class="alarms">
+          <li class="empty">No data loaded.</li>
+        </ul>
+      </section>
+
+      <p class="footnote">
+        Values produced by the simulator are tagged as simulated at the source and are never
+        presented as device measurements.
+      </p>
+    </main>
+
+    <script src="/public/dashboard.js"></script>
+  </body>
+</html>
