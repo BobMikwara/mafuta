@@ -148,7 +148,7 @@ npm run dev -w @fueltrack/web    # -> http://localhost:5173 with proxy to :3000
    ```
 4. Deploy
 5. Run migration: `prisma migrate deploy` uses `DIRECT_URL` via `directUrl` in `schema.prisma`
-6. Test: `https://your-app.vercel.app/healthz` -> `{"status":"ok"}`
+6. Test: `https://your-app.vercel.app/healthz` -> `{"status":"ok","persistence":"prisma","database":"up"}`. If it answers 503 with `"database":"down"`, the API is running but cannot query Supabase; follow the `internal_error` entry in Troubleshooting below.
 
 ## Step 7: Local Dev with Supabase
 
@@ -182,6 +182,14 @@ node apps/simulator-runner/dist/index.js --api-url http://localhost:3000 --api-k
 - `prisma generate` fails in Vercel -> ensure `buildCommand` includes it, and `@prisma/client` in dependencies
 - `Missing script: "db:generate"` with npm error location `packages/api` -> the Vercel Root Directory is set to `packages/api`. Clear it in Project Settings > General > Root Directory so the build runs from the repo root, where `db:generate` and the workspace build live. Root Directory cannot be set in `vercel.json`, it is a dashboard-only setting.
 - `Can't reach database` on Vercel -> use pooled 6543 URL with `?pgbouncer=true`, not direct 5432 for app
+- `{"error":"internal_error","requestId":"req-..."}` on every `/v1/*` call while `/healthz`, `/` and unauthenticated 401s work -> the database layer throws on its first query (the API key lookup inside auth), so every request with a Bearer header fails the same way. Diagnose in this order:
+  1. `GET /healthz`. `"database":"down"` (HTTP 503, `status:"degraded"`) confirms the app cannot query the database; `"persistence"` shows which backend is active (`prisma` or `memory`).
+  2. Vercel > Project > Logs (Functions): find `http.unhandled_error` with the same `requestId`. `reason` and `code` name the cause:
+     - `PrismaClientInitializationError` / `P1001` unreachable: `DATABASE_URL` points at the direct host (`db.<ref>.supabase.co`), which is IPv6-only on free plans and unreachable from Vercel functions. Use the pooler host (`aws-0-<region>.pooler.supabase.com:6543` with `?pgbouncer=true`).
+     - `P1000` authentication failed: the database password in `DATABASE_URL` is wrong or contains unescaped reserved characters. URL-encode it (`@` -> `%40`, `#` -> `%23`, `/` -> `%2F`).
+     - `PrismaClientKnownRequestError` / `P2021` table does not exist: migrations were never applied to Supabase. Run `npm run db:deploy` with `DATABASE_URL` and `DIRECT_URL` set (uses `directUrl` automatically). This also applies when only older migrations ran and `api_keys` (0003) is missing.
+     - "Environment variable not found: DATABASE_URL": `USE_PRISMA=true` is set but `DATABASE_URL` is missing in Vercel env, add it and redeploy.
+  3. Cold-start seed failures appear as `seed.step_failed` warnings with the failing step (`site`, `tank-diesel-1`, `tank-petrol95-2`, `api-key`), so a seed that silently skipped the demo key can no longer be mistaken for an auth problem.
 - In-memory data lost on Vercel -> set `USE_PRISMA=true` and `DATABASE_URL`
 - CORS errors -> set `VITE_API_URL` to backend URL or use relative URLs when frontend and backend same Vercel project
 

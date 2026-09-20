@@ -4,12 +4,14 @@ import { existsSync } from 'node:fs';
 import { buildServer, createPlatformDependencies, type PlatformDependencies } from '@fueltrack/api';
 import {
   API_KEY_SCOPES,
+  ConflictError,
   createSiteSchema,
   createTankSchema,
   parseInput,
   systemClock,
   toSiteId,
   toTenantId,
+  type Logger,
   type TenantId,
 } from '@fueltrack/core';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -61,7 +63,9 @@ function readConfig(env: NodeJS.ProcessEnv = process.env): ApiServerConfig {
   try {
     demoTenantId = toTenantId(tenantRaw);
   } catch {
-    throw new ConfigurationError('FUELTRACK_DEMO_TENANT_ID must be a lowercase alphanumeric identifier');
+    throw new ConfigurationError(
+      'FUELTRACK_DEMO_TENANT_ID must be a lowercase alphanumeric identifier',
+    );
   }
 
   return {
@@ -122,72 +126,123 @@ function findDashboardDir(configured: string | null): string | null {
 // Seed logic (same as apps/api-server)
 // ---------------------------------------------------------------------------
 
+type SeedOutcome = 'ok' | 'exists' | 'failed';
+
+function isAlreadyExists(error: unknown): boolean {
+  // In-memory adapters signal duplicates with a domain error; Prisma uses the
+  // P2002 unique-constraint code. Warm instances re-running the seed hit both.
+  if (error instanceof ConflictError) return true;
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'P2002'
+  );
+}
+
+/**
+ * Runs one seed step. Duplicates are expected on warm/reused instances and are
+ * logged at debug; any other failure is logged at warn with the error name and
+ * driver code so an unreachable or unmigrated database is visible in the
+ * platform logs instead of being silently ignored.
+ */
+async function seedStep(
+  logger: Logger,
+  step: string,
+  run: () => Promise<unknown>,
+): Promise<SeedOutcome> {
+  try {
+    await run();
+    return 'ok';
+  } catch (error) {
+    if (isAlreadyExists(error)) {
+      logger.debug('seed.skip', { step, reason: 'already_exists' });
+      return 'exists';
+    }
+    logger.warn('seed.step_failed', {
+      step,
+      reason: error instanceof Error ? error.name : 'unknown',
+      ...(typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      typeof (error as { code?: unknown }).code === 'string'
+        ? { code: (error as { code: string }).code }
+        : {}),
+    });
+    return 'failed';
+  }
+}
+
 async function seedDemoData(
   dependencies: PlatformDependencies,
   config: ApiServerConfig,
-): Promise<void> {
+): Promise<boolean> {
   const tenantId = config.demoTenantId;
+  const logger = dependencies.logger;
+  const outcomes: SeedOutcome[] = [];
 
-  try {
-    await dependencies.fleetService.createSite(
-      tenantId,
-      parseInput(createSiteSchema, {
-        id: DEMO_SITE_ID,
-        name: 'Demo Depot',
-        timezone: 'Africa/Nairobi',
-      }),
-    );
-  } catch {
-    // Site may already exist on warm lambda, ignore
-  }
+  outcomes.push(
+    await seedStep(logger, 'site', () =>
+      dependencies.fleetService.createSite(
+        tenantId,
+        parseInput(createSiteSchema, {
+          id: DEMO_SITE_ID,
+          name: 'Demo Depot',
+          timezone: 'Africa/Nairobi',
+        }),
+      ),
+    ),
+  );
 
-  try {
-    await dependencies.fleetService.createTank(
-      tenantId,
-      parseInput(createTankSchema, {
-        siteId: DEMO_SITE_ID,
-        name: 'Diesel Tank 1',
-        product: 'diesel',
-        geometry: { kind: 'vertical-cylinder', diameterMm: 2500, heightMm: 4000 },
-        capacityLitres: 19_000,
-      }),
-    );
-  } catch {
-    // ignore if already exists
-  }
+  outcomes.push(
+    await seedStep(logger, 'tank-diesel-1', () =>
+      dependencies.fleetService.createTank(
+        tenantId,
+        parseInput(createTankSchema, {
+          siteId: DEMO_SITE_ID,
+          name: 'Diesel Tank 1',
+          product: 'diesel',
+          geometry: { kind: 'vertical-cylinder', diameterMm: 2500, heightMm: 4000 },
+          capacityLitres: 19_000,
+        }),
+      ),
+    ),
+  );
 
-  try {
-    await dependencies.fleetService.createTank(
-      tenantId,
-      parseInput(createTankSchema, {
-        siteId: DEMO_SITE_ID,
-        name: 'Petrol 95 Tank 2',
-        product: 'petrol-95',
-        geometry: { kind: 'vertical-cylinder', diameterMm: 2200, heightMm: 3600 },
-        capacityLitres: 13_000,
-      }),
-    );
-  } catch {
-    // ignore
-  }
+  outcomes.push(
+    await seedStep(logger, 'tank-petrol95-2', () =>
+      dependencies.fleetService.createTank(
+        tenantId,
+        parseInput(createTankSchema, {
+          siteId: DEMO_SITE_ID,
+          name: 'Petrol 95 Tank 2',
+          product: 'petrol-95',
+          geometry: { kind: 'vertical-cylinder', diameterMm: 2200, heightMm: 3600 },
+          capacityLitres: 13_000,
+        }),
+      ),
+    ),
+  );
 
   if (config.devApiKey !== null) {
-    try {
-      const issued = await dependencies.issueApiKey({
-        tenantId,
-        name: 'local-development-key',
-        scopes: [...API_KEY_SCOPES],
-        secret: config.devApiKey,
-      });
-      dependencies.logger.info('demo.seeded', {
-        tenantId,
-        siteId: DEMO_SITE_ID,
-        keyId: issued.record.id,
-      });
-    } catch {
-      // key may already exist
-    }
+    outcomes.push(
+      await seedStep(logger, 'api-key', async () => {
+        const issued = await dependencies.issueApiKey({
+          tenantId,
+          name: 'local-development-key',
+          scopes: [...API_KEY_SCOPES],
+          secret: config.devApiKey as string,
+        });
+        logger.info('demo.seeded', {
+          tenantId,
+          siteId: DEMO_SITE_ID,
+          keyId: issued.record.id,
+        });
+      }),
+    );
   }
+
+  return !outcomes.includes('failed');
 }
 
 // ---------------------------------------------------------------------------
@@ -216,8 +271,11 @@ async function getCachedApp(): Promise<Cached['app']> {
   });
 
   if (config.seedDemo && globalThis.__fueltrack_seeded__ !== true) {
-    await seedDemoData(dependencies, config);
-    globalThis.__fueltrack_seeded__ = true;
+    // Only remember the seed when every step passed (or already existed). If
+    // the database was briefly unreachable, the next cold start must retry,
+    // otherwise the demo key would never be installed on this instance.
+    const seeded = await seedDemoData(dependencies, config);
+    globalThis.__fueltrack_seeded__ = seeded;
   }
 
   const dashboardDir = findDashboardDir(config.dashboardDir);

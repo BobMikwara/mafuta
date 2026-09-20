@@ -1,4 +1,5 @@
 import {
+  checkPrismaConnection,
   createLogger,
   createMemoryApiKeyRegistry,
   createMemoryRepositories,
@@ -62,7 +63,9 @@ function shouldUsePrisma(explicit?: boolean): boolean {
   if (process.env['DATABASE_URL']?.includes('supabase')) return true;
   if (process.env['DATABASE_URL']?.startsWith('postgresql://')) {
     // If DATABASE_URL is set and not the local docker default, prefer Prisma in production
-    const isLocalDocker = process.env['DATABASE_URL']?.includes('localhost:5432') && process.env['DATABASE_URL']?.includes('fueltrack_dev');
+    const isLocalDocker =
+      process.env['DATABASE_URL']?.includes('localhost:5432') &&
+      process.env['DATABASE_URL']?.includes('fueltrack_dev');
     if (!isLocalDocker && process.env['NODE_ENV'] === 'production') return true;
   }
   return false;
@@ -113,6 +116,8 @@ export function createPlatformDependencies(
     logger,
     repositories,
     apiKeys,
+    persistence: usePrisma ? 'prisma' : 'memory',
+    ...(usePrisma ? { ready: checkPrismaConnection } : {}),
     fleetService: new FleetService({ repositories, clock, logger }),
     ingestService: new IngestService({ repositories, clock, logger }),
     issueApiKey: async (input) => {
