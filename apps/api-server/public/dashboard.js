@@ -29,10 +29,22 @@
     );
   }
 
+  function normalizeKey(raw) {
+    var key = String(raw).trim();
+    if (/^Bearer\s+/i.test(key)) {
+      key = key.replace(/^Bearer\s+/i, '').trim();
+    }
+    if ((key.charAt(0) === '"' && key.charAt(key.length - 1) === '"') || (key.charAt(0) === "'" && key.charAt(key.length - 1) === "'")) {
+      key = key.slice(1, -1).trim();
+    }
+    return key;
+  }
+
   function request(path, key) {
+    var secret = normalizeKey(key);
     return fetch(path, {
       method: 'GET',
-      headers: { authorization: 'Bearer ' + key, accept: 'application/json' },
+      headers: { authorization: 'Bearer ' + secret, accept: 'application/json' },
       cache: 'no-store',
     }).then(function (response) {
       if (response.status === 401) {
@@ -42,6 +54,11 @@
         throw new Error('Request failed with status ' + response.status);
       }
       return response.json();
+    }, function (error) {
+      if (error && /Failed to fetch|NetworkError|Load failed/i.test(error.message || '')) {
+        throw new Error('Unable to reach the API. Check that the API is running and CORS is configured.');
+      }
+      throw error;
     });
   }
 
@@ -170,7 +187,7 @@
 
   element('credentials-form').addEventListener('submit', function (event) {
     event.preventDefault();
-    var key = element('api-key').value.trim();
+    var key = normalizeKey(element('api-key').value);
     if (key.length === 0) {
       status('Enter an API key first', 'error');
       return;
@@ -190,6 +207,8 @@
 
   var remembered = window.sessionStorage.getItem(KEY_STORAGE);
   if (remembered) {
+    remembered = normalizeKey(remembered);
+    window.sessionStorage.setItem(KEY_STORAGE, remembered);
     element('api-key').value = remembered;
     start(remembered);
   }

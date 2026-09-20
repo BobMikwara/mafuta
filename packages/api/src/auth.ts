@@ -8,8 +8,43 @@ import {
   type TenantContext,
 } from '@fueltrack/core';
 
-const BEARER_PREFIX = 'Bearer ';
 const MAX_SECRET_LENGTH = 256;
+// Accept "Bearer <token>" case-insensitively and tolerate extra whitespace.
+// The secret itself never contains whitespace, so trimming is safe and matches
+// the frontend's input.trim() behavior.
+const BEARER_PATTERN = /^Bearer\s+(.+)$/i;
+
+function extractSecret(header: string): string | null {
+  const trimmed = header.trim();
+  // Fast path for the common correctly cased value, then regex fallback.
+  if (trimmed.startsWith('Bearer ')) {
+    return trimmed.slice('Bearer '.length).trim();
+  }
+  const match = BEARER_PATTERN.exec(trimmed);
+  if (match?.[1] === undefined) {
+    return null;
+  }
+  return match[1].trim();
+}
+
+// If the user pasted "Bearer ftk_..." into the UI, the frontend now strips it,
+// but the backend also tolerates a duplicated prefix so that manual curl
+// mistakes do not look like an invalid key.
+function stripDuplicatedBearerPrefix(secret: string): string {
+  let current = secret.trim();
+  // Repeatedly strip so "Bearer Bearer ftk..." also works.
+  while (/^Bearer\s+/i.test(current)) {
+    current = current.replace(/^Bearer\s+/i, '').trim();
+  }
+  // Strip surrounding quotes that copy-paste from docs or JSON might introduce.
+  if (
+    (current.startsWith('"') && current.endsWith('"')) ||
+    (current.startsWith("'") && current.endsWith("'"))
+  ) {
+    current = current.slice(1, -1).trim();
+  }
+  return current;
+}
 
 export interface AuthDependencies {
   readonly apiKeys: ApiKeyRegistry;
@@ -28,11 +63,16 @@ async function resolveTenantContext(
   dependencies: AuthDependencies,
 ): Promise<TenantContext> {
   const header = request.headers.authorization;
-  if (typeof header !== 'string' || !header.startsWith(BEARER_PREFIX)) {
+  if (typeof header !== 'string') {
     throw new UnauthorizedError('Missing bearer credentials');
   }
 
-  const secret = header.slice(BEARER_PREFIX.length).trim();
+  const extracted = extractSecret(header);
+  if (extracted === null) {
+    throw new UnauthorizedError('Missing bearer credentials');
+  }
+
+  const secret = stripDuplicatedBearerPrefix(extracted);
   if (secret.length === 0 || secret.length > MAX_SECRET_LENGTH) {
     throw new UnauthorizedError('Malformed bearer credentials');
   }
@@ -69,6 +109,15 @@ export function registerAuthentication(app: FastifyInstance, dependencies: AuthD
   app.decorateRequest('tenantContext', undefined);
 
   app.addHook('onRequest', (request: FastifyRequest, _reply: FastifyReply, done) => {
+    // CORS preflight must not require credentials. The global CORS hook in
+    // server.ts already replies 204, but when the frontend uses same-origin
+    // fetch there is no preflight yet the browser may still issue OPTIONS.
+    // Allowing OPTIONS through here keeps the behavior consistent if the
+    // global hook is not present (e.g. in isolated tests).
+    if (request.method === 'OPTIONS') {
+      return done();
+    }
+
     resolveTenantContext(request, dependencies)
       .then((context) => {
         request.tenantContext = context;

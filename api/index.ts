@@ -51,9 +51,9 @@ function readConfig(env: NodeJS.ProcessEnv = process.env): ApiServerConfig {
   const devApiKey = env['FUELTRACK_DEV_API_KEY']?.trim() ?? '';
   const tenantRaw = env['FUELTRACK_DEMO_TENANT_ID']?.trim() ?? 'demo-tenant';
 
-  if (seedDemo && devApiKey.length > 0 && devApiKey.length < 16) {
+  if (seedDemo && devApiKey.length < 16) {
     throw new ConfigurationError(
-      'FUELTRACK_SEED_DEMO=true requires FUELTRACK_DEV_API_KEY with at least 16 characters if supplied.',
+      'FUELTRACK_SEED_DEMO=true requires FUELTRACK_DEV_API_KEY with at least 16 characters. The key is supplied by the operator and is never logged.',
     );
   }
 

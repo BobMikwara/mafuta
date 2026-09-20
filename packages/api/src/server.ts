@@ -82,6 +82,32 @@ export async function buildServer(
     genReqId: () => newId('req'),
   });
 
+  // CORS: must run before authentication so that preflight OPTIONS requests
+  // with an Authorization header do not get rejected with 401 before the
+  // browser sees the CORS headers. The frontend and device clients send
+  // Authorization: Bearer <key>, which triggers a preflight.
+  app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
+    const origin = request.headers.origin as string | undefined;
+    if (origin !== undefined) {
+      void reply.header('Access-Control-Allow-Origin', origin);
+      void reply.header('Vary', 'Origin');
+    } else {
+      void reply.header('Access-Control-Allow-Origin', '*');
+    }
+    void reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    void reply.header(
+      'Access-Control-Allow-Headers',
+      'Authorization, Content-Type, X-Request-Id, Accept, Cache-Control',
+    );
+    void reply.header('Access-Control-Allow-Credentials', 'false');
+    void reply.header('Access-Control-Max-Age', '86400');
+
+    if (request.method === 'OPTIONS') {
+      // Preflight never needs authentication; end the request here.
+      return reply.code(204).send();
+    }
+  });
+
   app.addHook('onSend', async (request: FastifyRequest, reply: FastifyReply, payload: unknown) => {
     void reply.header('X-Content-Type-Options', 'nosniff');
     void reply.header('X-Frame-Options', 'DENY');
