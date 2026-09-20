@@ -19,45 +19,79 @@ async function seedDemoData(
 ): Promise<void> {
   const tenantId = config.demoTenantId;
 
-  await dependencies.fleetService.createSite(
-    tenantId,
-    parseInput(createSiteSchema, {
-      id: DEMO_SITE_ID,
-      name: 'Demo Depot',
-      timezone: 'Africa/Nairobi',
-    }),
-  );
+  // The seed runs before the server starts listening, so a failing step must
+  // abort startup (fail fast) - but with the step named, otherwise an
+  // unreachable or unmigrated database surfaces as an anonymous stack trace.
+  const steps: ReadonlyArray<readonly [string, () => Promise<unknown>]> = [
+    [
+      'site',
+      () =>
+        dependencies.fleetService.createSite(
+          tenantId,
+          parseInput(createSiteSchema, {
+            id: DEMO_SITE_ID,
+            name: 'Demo Depot',
+            timezone: 'Africa/Nairobi',
+          }),
+        ),
+    ],
+    [
+      'tank-diesel-1',
+      () =>
+        dependencies.fleetService.createTank(
+          tenantId,
+          parseInput(createTankSchema, {
+            siteId: DEMO_SITE_ID,
+            name: 'Diesel Tank 1',
+            product: 'diesel',
+            geometry: { kind: 'vertical-cylinder', diameterMm: 2500, heightMm: 4000 },
+            capacityLitres: 19_000,
+          }),
+        ),
+    ],
+    [
+      'tank-petrol95-2',
+      () =>
+        dependencies.fleetService.createTank(
+          tenantId,
+          parseInput(createTankSchema, {
+            siteId: DEMO_SITE_ID,
+            name: 'Petrol 95 Tank 2',
+            product: 'petrol-95',
+            geometry: { kind: 'vertical-cylinder', diameterMm: 2200, heightMm: 3600 },
+            capacityLitres: 13_000,
+          }),
+        ),
+    ],
+  ];
 
-  await dependencies.fleetService.createTank(
-    tenantId,
-    parseInput(createTankSchema, {
-      siteId: DEMO_SITE_ID,
-      name: 'Diesel Tank 1',
-      product: 'diesel',
-      geometry: { kind: 'vertical-cylinder', diameterMm: 2500, heightMm: 4000 },
-      capacityLitres: 19_000,
-    }),
-  );
-
-  await dependencies.fleetService.createTank(
-    tenantId,
-    parseInput(createTankSchema, {
-      siteId: DEMO_SITE_ID,
-      name: 'Petrol 95 Tank 2',
-      product: 'petrol-95',
-      geometry: { kind: 'vertical-cylinder', diameterMm: 2200, heightMm: 3600 },
-      capacityLitres: 13_000,
-    }),
-  );
+  for (const [step, run] of steps) {
+    try {
+      await run();
+    } catch (error) {
+      throw new Error(
+        `demo seed failed at step "${step}": ${error instanceof Error ? error.message : 'unknown error'}`,
+        { cause: error },
+      );
+    }
+  }
 
   // The secret comes from the operator through FUELTRACK_DEV_API_KEY, so the
   // developer who started the server is the only one who knows it.
-  const issued = await dependencies.issueApiKey({
-    tenantId,
-    name: 'local-development-key',
-    scopes: [...API_KEY_SCOPES],
-    ...(config.devApiKey === null ? {} : { secret: config.devApiKey }),
-  });
+  let issued: Awaited<ReturnType<PlatformDependencies['issueApiKey']>>;
+  try {
+    issued = await dependencies.issueApiKey({
+      tenantId,
+      name: 'local-development-key',
+      scopes: [...API_KEY_SCOPES],
+      ...(config.devApiKey === null ? {} : { secret: config.devApiKey }),
+    });
+  } catch (error) {
+    throw new Error(
+      `demo seed failed at step "api-key": ${error instanceof Error ? error.message : 'unknown error'}`,
+      { cause: error },
+    );
+  }
 
   dependencies.logger.info('demo.seeded', {
     tenantId,

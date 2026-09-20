@@ -28,6 +28,16 @@ export function getPrismaClient(): PrismaClient {
   return client;
 }
 
+/**
+ * Readiness probe used by `/healthz`. Resolves when the database answers a
+ * trivial query, rejects with the underlying Prisma/driver error otherwise.
+ * The error is for operators (logs) only and must never be serialized into an
+ * HTTP response, because it can contain connection-string fragments.
+ */
+export async function checkPrismaConnection(): Promise<void> {
+  await getPrismaClient().$queryRaw`SELECT 1`;
+}
+
 export async function ensureTenantExists(tenantId: string): Promise<void> {
   const prisma = getPrismaClient();
   await prisma.tenant.upsert({

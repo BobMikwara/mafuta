@@ -22,6 +22,35 @@ import { registerTankRoutes } from './routes/tanks.js';
 import { registerAlarmRoutes } from './routes/alarms.js';
 
 const DEFAULT_BODY_LIMIT_BYTES = 65_536;
+/**
+ * Upper bound for the `/healthz` readiness probe. A hung pooler connection
+ * must not hang the health endpoint itself, otherwise load balancers and
+ * operators cannot tell "API down" apart from "database down".
+ */
+const HEALTH_PROBE_TIMEOUT_MS = 3_000;
+
+/**
+ * Races the readiness probe against a timeout. Resolves `true` only when the
+ * probe resolves in time. The probe's rejection is intentionally swallowed
+ * after being observed: detail belongs in platform logs, not HTTP responses.
+ */
+function probeWithTimeout(probe: () => Promise<void>, timeoutMs: number): Promise<boolean> {
+  return new Promise<boolean>((resolvePromise) => {
+    const timer = setTimeout(() => resolvePromise(false), timeoutMs);
+    // A dangling health-probe timer must never keep a process or test alive.
+    if (typeof timer.unref === 'function') timer.unref();
+    void probe().then(
+      () => {
+        clearTimeout(timer);
+        resolvePromise(true);
+      },
+      () => {
+        clearTimeout(timer);
+        resolvePromise(false);
+      },
+    );
+  });
+}
 
 export interface ServerDependencies {
   readonly repositories: Repositories;
@@ -30,6 +59,17 @@ export interface ServerDependencies {
   readonly logger?: Logger;
   readonly fleetService?: FleetService;
   readonly ingestService?: IngestServiceType;
+  /**
+   * Label of the persistence backend (`'prisma'`, `'memory'`, ...), reported
+   * by `/healthz` so operators can verify which store a deployment is using.
+   */
+  readonly persistence?: string;
+  /**
+   * Optional readiness probe: resolves when the persistence backend answers,
+   * rejects otherwise. `/healthz` returns 503 when the probe fails so a
+   * broken database cannot hide behind a healthy-looking liveness response.
+   */
+  readonly ready?: () => Promise<void>;
 }
 
 export interface ServerOptions {
@@ -136,10 +176,27 @@ export async function buildServer(
 
   registerErrorHandler(app, logger);
 
-  app.get('/healthz', async () => ({
-    status: 'ok',
-    time: clock.now().toISOString(),
-  }));
+  app.get('/healthz', async (_request: FastifyRequest, reply: FastifyReply) => {
+    const persistence = dependencies.persistence ?? 'memory';
+    const time = clock.now().toISOString();
+
+    if (dependencies.ready === undefined) {
+      return {
+        status: 'ok',
+        time,
+        persistence,
+        database: 'not_configured',
+      };
+    }
+
+    const reachable = await probeWithTimeout(dependencies.ready, HEALTH_PROBE_TIMEOUT_MS);
+    if (reachable) {
+      return { status: 'ok', time, persistence, database: 'up' };
+    }
+
+    logger.warn('http.health_probe_failed', { persistence });
+    return reply.code(503).send({ status: 'degraded', time, persistence, database: 'down' });
+  });
 
   const dashboardDir = options.dashboardDir;
   if (dashboardDir !== undefined) {

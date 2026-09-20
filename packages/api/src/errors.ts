@@ -109,6 +109,13 @@ export function registerErrorHandler(app: FastifyInstance, logger: Logger): void
         method: request.method,
         url: request.url,
         reason: error.name,
+        // Prisma and the driver tag failures (`P1001` unreachable database,
+        // `P2021` missing table, ...). Surfacing the code here is what lets an
+        // operator correlate a bare `internal_error` response with the actual
+        // cause in the platform logs. Logged only - never sent to the caller.
+        ...('code' in error && typeof (error as { code?: unknown }).code === 'string'
+          ? { code: (error as { code: string }).code }
+          : {}),
       });
 
       const body: ErrorBody = { error: 'internal_error', requestId };
