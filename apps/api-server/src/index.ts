@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { buildServer, createPlatformDependencies, type PlatformDependencies } from '@fueltrack/api';
 import {
   API_KEY_SCOPES,
+  autoMigrateOnBoot,
   createSiteSchema,
   createTankSchema,
   parseInput,
@@ -107,6 +108,15 @@ export async function main(): Promise<void> {
     minLogLevel: config.minLogLevel,
     clock: systemClock,
   });
+
+  if (config.autoMigrate) {
+    // Long running server: same opt-in cold start migration path as the
+    // serverless entry point, so `npm start` against an empty database works.
+    await autoMigrateOnBoot({
+      logger: dependencies.logger,
+      here,
+    });
+  }
 
   if (config.seedDemo) {
     await seedDemoData(dependencies, config);

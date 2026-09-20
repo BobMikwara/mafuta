@@ -7,7 +7,7 @@
   "framework": "vite",
   "functions": {
     "api/index.ts": {
-      "includeFiles": "apps/api-server/public/**"
+      "includeFiles": "{apps/api-server/public/**,prisma/migrations/**}"
     }
   },
   "rewrites": [

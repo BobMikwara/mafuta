@@ -1,5 +1,6 @@
 import {
   checkPrismaConnection,
+  describePrismaSchemaStatus,
   createLogger,
   createMemoryApiKeyRegistry,
   createMemoryRepositories,
@@ -117,7 +118,9 @@ export function createPlatformDependencies(
     repositories,
     apiKeys,
     persistence: usePrisma ? 'prisma' : 'memory',
-    ...(usePrisma ? { ready: checkPrismaConnection } : {}),
+    ...(usePrisma
+      ? { ready: checkPrismaConnection, schemaStatus: describePrismaSchemaStatus }
+      : {}),
     fleetService: new FleetService({ repositories, clock, logger }),
     ingestService: new IngestService({ repositories, clock, logger }),
     issueApiKey: async (input) => {

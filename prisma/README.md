@@ -35,6 +35,41 @@ npm run db:deploy       # applies committed migrations
 The schema and the migration tests run without Docker: `npm run db:test` uses
 PGlite, which is PostgreSQL compiled to WebAssembly and runs in process.
 
+## Runtime migrations (serverless)
+
+`prisma migrate deploy` needs the Prisma CLI and its engines, which a Vercel
+serverless bundle does not ship. So the app can apply these same files itself at
+cold start with `FUELTRACK_AUTO_MIGRATE=true` (see
+`docs/vercel-supabase-guide.md`, Step 2b). The runner lives in
+`packages/core/src/adapters/prisma/migrate.ts` (driver agnostic) and
+`pg-migrate.ts` (the `pg` adapter and the cold-start entry point).
+
+It is deliberately CLI compatible:
+
+- It applies `migrations/<name>/migration.sql` in the same lexicographic version
+  order the CLI uses.
+- It creates and writes the same `_prisma_migrations` table with the same
+  columns, checksums (SHA-256 of the file) and `applied_steps_count`, so running
+  `prisma migrate deploy` afterwards sees the migrations as applied and does not
+  re-run them.
+- A failed file is recorded with `rolled_back_at` set and its message in `logs`,
+  then retried on the next boot. Each file runs in its own transaction, so a
+  failure never leaves a file half applied.
+- It edits nothing: if an already applied file changes, it reports drift in the
+  logs instead of silently re-running it.
+
+Safety: the run is wrapped in a Postgres advisory lock so concurrent cold starts
+apply the migrations once, and it connects through `DIRECT_URL` because a
+transaction-mode pooler cannot run DDL or hold session locks. It never throws
+into the boot; a failure is logged as `db.migrate_failed` and surfaced by
+`/healthz` as `"database":"unmigrated"`.
+
+Tests: `packages/core/test/prisma-migrate.test.ts` applies the real migrations to
+PostgreSQL (via PGlite) and asserts the bookkeeping, rollback, retry, drift and
+out-of-order behaviour. `prisma/test/pg-migrate-integration.test.ts` runs the
+real `pg` driver against a live server in the CI `database` job and skips
+elsewhere.
+
 ## Changing the schema
 
 1. Edit `schema.prisma`.

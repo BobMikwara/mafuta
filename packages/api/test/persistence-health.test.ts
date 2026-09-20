@@ -60,6 +60,70 @@ describe('healthz readiness', () => {
     }
   });
 
+  it('reports database unmigrated when the connection works but tables are missing', async () => {
+    // This is the exact state in the reported incident: the pooler answers, the
+    // readiness probe passes, but no migration ever ran, so every /v1 request
+    // 401s. /healthz must say 'unmigrated', not 'up'.
+    const deps = silentDeps();
+    const app = await buildServer({
+      ...deps,
+      persistence: 'prisma',
+      ready: async () => Promise.resolve(),
+      schemaStatus: async () => ({
+        status: 'unmigrated',
+        missingTables: ['tenants', 'stations', 'api_keys'],
+      }),
+    });
+    try {
+      const response = await app.inject({ method: 'GET', url: '/healthz' });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({
+        status: 'degraded',
+        persistence: 'prisma',
+        database: 'unmigrated',
+      });
+      // Table names are safe to log but must not reach the HTTP body.
+      expect(JSON.stringify(response.json())).not.toContain('tenants');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('reports database up when the schema probe confirms the tables exist', async () => {
+    const deps = silentDeps();
+    const app = await buildServer({
+      ...deps,
+      persistence: 'prisma',
+      ready: async () => Promise.resolve(),
+      schemaStatus: async () => ({ status: 'migrated' }),
+    });
+    try {
+      const response = await app.inject({ method: 'GET', url: '/healthz' });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ status: 'ok', database: 'up' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('stays healthy when the schema probe hangs, so a slow catalog query cannot fail readiness', async () => {
+    const deps = silentDeps();
+    const app = await buildServer({
+      ...deps,
+      persistence: 'prisma',
+      ready: async () => Promise.resolve(),
+      schemaStatus: () => new Promise<never>(() => {}),
+    });
+    try {
+      const response = await app.inject({ method: 'GET', url: '/healthz' });
+      // The probe times out to null, which is treated as "not unmigrated".
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ status: 'ok', database: 'up' });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('returns 503 with status degraded when the database probe fails', async () => {
     const deps = silentDeps();
     const unreachable = Object.assign(new Error('connect ETIMEDOUT'), {

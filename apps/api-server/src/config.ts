@@ -10,6 +10,11 @@ export interface ApiServerConfig {
   readonly minLogLevel: 'debug' | 'info' | 'warn' | 'error' | 'critical';
   readonly requestLogging: boolean;
   readonly seedDemo: boolean;
+  /**
+   * Applies `prisma/migrations` at startup when persistence is Postgres. Off by
+   * default so migrating stays an explicit operator decision.
+   */
+  readonly autoMigrate: boolean;
   /** Supplied by the operator. Never logged, never echoed to the dashboard. */
   readonly devApiKey: string | null;
   readonly demoTenantId: TenantId;
@@ -72,6 +77,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ApiServerConfi
     minLogLevel: readLogLevel(env['FUELTRACK_LOG_LEVEL']),
     requestLogging: env['FUELTRACK_REQUEST_LOGGING'] !== 'false',
     seedDemo,
+    autoMigrate: env['FUELTRACK_AUTO_MIGRATE'] === 'true',
     devApiKey: devApiKey.length === 0 ? null : devApiKey,
     demoTenantId,
     dashboardDir: env['FUELTRACK_DASHBOARD_DIR']?.trim() || null,

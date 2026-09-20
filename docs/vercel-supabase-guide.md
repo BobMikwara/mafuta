@@ -53,6 +53,42 @@ export SHADOW_DATABASE_URL=postgresql://fueltrack:fueltrack@localhost:5433/fuelt
 npm run db:drift
 ```
 
+## Step 2b: Migrations On Cold Start (serverless)
+
+Vercel runs `prisma generate` at build time but never `prisma migrate deploy`,
+so a fresh Supabase database has no tables and every `/v1/*` request fails with
+Prisma `P2021` ("table does not exist"), which surfaces to clients as a `401`
+(the API key lookup is the first query of every request).
+
+Set `FUELTRACK_AUTO_MIGRATE=true` and the function applies the committed
+migrations itself on cold start, before seeding:
+
+- It reads `prisma/migrations/<name>/migration.sql` from the deployed bundle
+  (`vercel.json` `includeFiles` ships them) and applies them in version order.
+- It writes the same `_prisma_migrations` bookkeeping table the Prisma CLI uses,
+  so a later `prisma migrate deploy` sees them as applied and does not re-run.
+- It is idempotent: a warm instance or a second deploy applies nothing.
+- It runs under a Postgres advisory lock, so concurrent cold starts apply the
+  migrations exactly once instead of racing.
+- It connects with `DIRECT_URL` when set. Supabase puts the app behind a
+  transaction-mode pooler (`DATABASE_URL`, port 6543) that cannot run DDL or hold
+  session locks, so migrations must use the direct connection (port 5432).
+- It never crashes the boot: a failure is logged as `db.migrate_failed` with the
+  step and SQLSTATE, and `/healthz` reports `"database":"unmigrated"`.
+
+Environment:
+
+```
+FUELTRACK_AUTO_MIGRATE=true
+# Optional: where prisma/migrations lives inside the bundle, if auto-detection
+# does not find it.
+FUELTRACK_MIGRATIONS_DIR=
+```
+
+The same flag works for the long-running server (`apps/api-server`) via
+`npm start`. To apply migrations manually instead (no runtime flag), run
+`npm run db:deploy` with `DIRECT_URL` set, as in Step 2.
+
 ## Step 3: Prisma Repositories (implemented)
 
 Located in `packages/core/src/adapters/prisma/`:
@@ -84,7 +120,7 @@ apiKeys = usePrisma ? createPrismaApiKeyRegistry() : createMemoryApiKeyRegistry(
   "buildCommand": "npm run db:generate && npm run build",
   "outputDirectory": "apps/web/dist",
   "framework": "vite",
-  "functions": { "api/index.ts": { "includeFiles": "apps/api-server/public/**" } },
+  "functions": { "api/index.ts": { "includeFiles": "{apps/api-server/public/**,prisma/migrations/**}" } },
   "rewrites": [
     { "source": "/healthz", "destination": "/api" },
     { "source": "/v1/(.*)", "destination": "/api" }
@@ -95,6 +131,7 @@ apiKeys = usePrisma ? createPrismaApiKeyRegistry() : createMemoryApiKeyRegistry(
 `api/index.ts` is a Vercel serverless function:
 - Reads config from env (same as api-server)
 - Creates platform deps (Prisma if env set)
+- Applies committed migrations on cold start if `FUELTRACK_AUTO_MIGRATE=true` (see Step 2b)
 - Seeds demo if `FUELTRACK_SEED_DEMO=true`
 - Finds dashboard dir via multiple candidates
 - Caches app on `globalThis` for warm invocations
@@ -141,6 +178,7 @@ npm run dev -w @fueltrack/web    # -> http://localhost:5173 with proxy to :3000
    DATABASE_URL=postgresql://...:6543/postgres?pgbouncer=true
    DIRECT_URL=postgresql://...:5432/postgres
    USE_PRISMA=true
+   FUELTRACK_AUTO_MIGRATE=true
    FUELTRACK_SEED_DEMO=true
    FUELTRACK_DEV_API_KEY=<16+ chars random>
    FUELTRACK_DEMO_TENANT_ID=demo-tenant
@@ -148,7 +186,9 @@ npm run dev -w @fueltrack/web    # -> http://localhost:5173 with proxy to :3000
    ```
 4. Deploy
 5. Run migration: `prisma migrate deploy` uses `DIRECT_URL` via `directUrl` in `schema.prisma`
-6. Test: `https://your-app.vercel.app/healthz` -> `{"status":"ok","persistence":"prisma","database":"up"}`. If it answers 503 with `"database":"down"`, the API is running but cannot query Supabase; follow the `internal_error` entry in Troubleshooting below.
+6. Test: `https://your-app.vercel.app/healthz` -> `{"status":"ok","persistence":"prisma","database":"up"}`.
+   - 503 with `"database":"down"`: the API is running but cannot reach Supabase. Follow the `internal_error` entry in Troubleshooting below.
+   - 503 with `"database":"unmigrated"`: the connection works but the tables are missing, so migrations never ran. Set `FUELTRACK_AUTO_MIGRATE=true` and redeploy, or run `npm run db:deploy` once. See Step 2b.
 
 ## Step 7: Local Dev with Supabase
 
@@ -187,7 +227,7 @@ node apps/simulator-runner/dist/index.js --api-url http://localhost:3000 --api-k
   2. Vercel > Project > Logs (Functions): find `http.unhandled_error` with the same `requestId`. `reason` and `code` name the cause:
      - `PrismaClientInitializationError` / `P1001` unreachable: `DATABASE_URL` points at the direct host (`db.<ref>.supabase.co`), which is IPv6-only on free plans and unreachable from Vercel functions. Use the pooler host (`aws-0-<region>.pooler.supabase.com:6543` with `?pgbouncer=true`).
      - `P1000` authentication failed: the database password in `DATABASE_URL` is wrong or contains unescaped reserved characters. URL-encode it (`@` -> `%40`, `#` -> `%23`, `/` -> `%2F`).
-     - `PrismaClientKnownRequestError` / `P2021` table does not exist: migrations were never applied to Supabase. Run `npm run db:deploy` with `DATABASE_URL` and `DIRECT_URL` set (uses `directUrl` automatically). This also applies when only older migrations ran and `api_keys` (0003) is missing.
+     - `PrismaClientKnownRequestError` / `P2021` table does not exist: migrations were never applied to Supabase. Set `FUELTRACK_AUTO_MIGRATE=true` and redeploy so the function applies them on cold start (Step 2b), or run `npm run db:deploy` once with `DIRECT_URL` set. `/healthz` reports `"database":"unmigrated"` while the tables are missing. This also applies when only older migrations ran and `api_keys` (0003) is missing.
      - "Environment variable not found: DATABASE_URL": `USE_PRISMA=true` is set but `DATABASE_URL` is missing in Vercel env, add it and redeploy.
   3. Cold-start seed failures appear as `seed.step_failed` warnings with the failing step (`site`, `tank-diesel-1`, `tank-petrol95-2`, `api-key`), so a seed that silently skipped the demo key can no longer be mistaken for an auth problem.
 - In-memory data lost on Vercel -> set `USE_PRISMA=true` and `DATABASE_URL`
