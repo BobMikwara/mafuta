@@ -2,13 +2,29 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { ConnectionPanel } from './components/ConnectionPanel';
 import { TanksTable } from './components/TanksTable';
 import { AlarmsList } from './components/AlarmsList';
-import { fetchTanks, fetchReadings, fetchAlarms, type Tank, type Reading, type Alarm } from './lib/api';
+import {
+  fetchTanks,
+  fetchReadings,
+  fetchAlarms,
+  normalizeApiKey,
+  type Tank,
+  type Reading,
+  type Alarm,
+} from './lib/api';
 
 const STORAGE_KEY = 'fueltrack.apiKey';
 const REFRESH_MS = 5000;
 
 export default function App() {
-  const [apiKey, setApiKey] = useState(() => sessionStorage.getItem(STORAGE_KEY) || '');
+  const [apiKey, setApiKey] = useState(() => {
+    const stored = sessionStorage.getItem(STORAGE_KEY) || '';
+    // Migrate old values that may have been saved with "Bearer " or quotes.
+    const normalized = stored ? normalizeApiKey(stored) : '';
+    if (normalized !== stored && normalized) {
+      sessionStorage.setItem(STORAGE_KEY, normalized);
+    }
+    return normalized;
+  });
   const [tanks, setTanks] = useState<Tank[]>([]);
   const [latestByTank, setLatestByTank] = useState<Record<string, Reading>>({});
   const [alarms, setAlarms] = useState<Alarm[]>([]);
@@ -72,8 +88,9 @@ export default function App() {
   }, [apiKey, startPolling, stopPolling]);
 
   const handleConnect = (key: string) => {
-    sessionStorage.setItem(STORAGE_KEY, key);
-    setApiKey(key);
+    const normalized = normalizeApiKey(key);
+    sessionStorage.setItem(STORAGE_KEY, normalized);
+    setApiKey(normalized);
   };
 
   const handleDisconnect = () => {

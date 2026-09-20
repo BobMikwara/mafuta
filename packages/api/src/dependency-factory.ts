@@ -122,11 +122,12 @@ export function createPlatformDependencies(
         scopes: input.scopes,
         createdAt: clock.now().toISOString(),
       });
-      const secret = input.secret ?? generated.secret;
+      const rawSecret = input.secret ?? generated.secret;
+      const secret = rawSecret.trim();
       const record =
         input.secret === undefined
           ? generated.record
-          : { ...generated.record, keyHash: hashApiKey(input.secret) };
+          : { ...generated.record, keyHash: hashApiKey(secret) };
       await apiKeys.save(record);
       return { record, secret };
     },
