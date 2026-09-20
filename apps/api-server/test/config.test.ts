@@ -9,9 +9,17 @@ describe('api server configuration', () => {
     expect(config.minLogLevel).toBe('info');
     expect(config.requestLogging).toBe(true);
     expect(config.seedDemo).toBe(false);
+    expect(config.autoMigrate).toBe(false);
     expect(config.devApiKey).toBeNull();
     expect(config.demoTenantId).toBe('demo-tenant');
     expect(config.dashboardDir).toBeNull();
+  });
+
+  it('enables cold start migration only on the exact opt-in value', () => {
+    expect(readConfig({ FUELTRACK_AUTO_MIGRATE: 'true' }).autoMigrate).toBe(true);
+    expect(readConfig({ FUELTRACK_AUTO_MIGRATE: '1' }).autoMigrate).toBe(false);
+    expect(readConfig({ FUELTRACK_AUTO_MIGRATE: 'TRUE' }).autoMigrate).toBe(false);
+    expect(readConfig({ FUELTRACK_AUTO_MIGRATE: '' }).autoMigrate).toBe(false);
   });
 
   it('reads the port, host and log level', () => {

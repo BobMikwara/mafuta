@@ -14,6 +14,7 @@ import {
   type Logger,
   type LogLevel,
   type Repositories,
+  type SchemaStatus,
 } from '@fueltrack/core';
 import { registerAuthentication } from './auth.js';
 import { registerErrorHandler } from './errors.js';
@@ -52,6 +53,44 @@ function probeWithTimeout(probe: () => Promise<void>, timeoutMs: number): Promis
   });
 }
 
+/**
+ * Runs the schema probe under the same timeout as the readiness probe and
+ * resolves `null` when it hangs or throws, so `/healthz` always answers.
+ */
+async function probeSchema(
+  probe: (() => Promise<SchemaStatus>) | undefined,
+  timeoutMs: number,
+): Promise<SchemaStatus | null> {
+  if (probe === undefined) {
+    return null;
+  }
+  return new Promise<SchemaStatus | null>((resolvePromise) => {
+    const timer = setTimeout(() => resolvePromise(null), timeoutMs);
+    if (typeof timer.unref === 'function') timer.unref();
+    void probe().then(
+      (status) => {
+        clearTimeout(timer);
+        resolvePromise(status);
+      },
+      () => {
+        clearTimeout(timer);
+        resolvePromise(null);
+      },
+    );
+  });
+}
+
+/**
+ * One line, loggable description of a schema probe result. Table names only:
+ * never a driver message, which can contain connection string fragments.
+ */
+function describeSchema(status: SchemaStatus | undefined): string {
+  if (status === undefined) return 'not_configured';
+  if (status.status === 'migrated') return 'migrated';
+  if (status.status === 'unmigrated') return `missing:${status.missingTables.join(',')}`;
+  return status.code === undefined ? status.reason : `${status.reason}:${status.code}`;
+}
+
 export interface ServerDependencies {
   readonly repositories: Repositories;
   readonly apiKeys: ApiKeyRegistry;
@@ -70,6 +109,13 @@ export interface ServerDependencies {
    * broken database cannot hide behind a healthy-looking liveness response.
    */
   readonly ready?: () => Promise<void>;
+  /**
+   * Optional schema probe, consulted only after `ready` succeeds. Distinguishes
+   * a reachable but never migrated database (`database: 'unmigrated'`) from a
+   * healthy one, because both answer every authenticated request with the same
+   * failure while needing opposite operator actions.
+   */
+  readonly schemaStatus?: () => Promise<SchemaStatus>;
 }
 
 export interface ServerOptions {
@@ -190,12 +236,26 @@ export async function buildServer(
     }
 
     const reachable = await probeWithTimeout(dependencies.ready, HEALTH_PROBE_TIMEOUT_MS);
-    if (reachable) {
-      return { status: 'ok', time, persistence, database: 'up' };
+    if (!reachable) {
+      logger.warn('http.health_probe_failed', { persistence });
+      return reply.code(503).send({ status: 'degraded', time, persistence, database: 'down' });
     }
 
-    logger.warn('http.health_probe_failed', { persistence });
-    return reply.code(503).send({ status: 'degraded', time, persistence, database: 'down' });
+    const schema = await probeSchema(dependencies.schemaStatus, HEALTH_PROBE_TIMEOUT_MS);
+    // Only a definite 'unmigrated' fails readiness. A probe that timed out
+    // (null) or errored ('unknown') is inconclusive, and the readiness probe
+    // already proved the database answers, so those must not report degraded.
+    if (schema !== null && schema.status === 'unmigrated') {
+      logger.warn('http.health_schema_unmigrated', {
+        persistence,
+        detail: describeSchema(schema),
+      });
+      return reply
+        .code(503)
+        .send({ status: 'degraded', time, persistence, database: 'unmigrated' });
+    }
+
+    return { status: 'ok', time, persistence, database: 'up' };
   });
 
   const dashboardDir = options.dashboardDir;

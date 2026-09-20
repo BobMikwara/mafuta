@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { buildServer, createPlatformDependencies, type PlatformDependencies } from '@fueltrack/api';
 import {
   API_KEY_SCOPES,
+  autoMigrateOnBoot,
   ConflictError,
   createSiteSchema,
   createTankSchema,
@@ -26,6 +27,11 @@ interface ApiServerConfig {
   readonly minLogLevel: LogLevel;
   readonly requestLogging: boolean;
   readonly seedDemo: boolean;
+  /**
+   * Applies `prisma/migrations` on cold start. Off by default: migrating from
+   * application code is an explicit operator decision, not a side effect.
+   */
+  readonly autoMigrate: boolean;
   readonly devApiKey: string | null;
   readonly demoTenantId: TenantId;
   readonly dashboardDir: string | null;
@@ -72,6 +78,7 @@ function readConfig(env: NodeJS.ProcessEnv = process.env): ApiServerConfig {
     minLogLevel: readLogLevel(env['FUELTRACK_LOG_LEVEL']),
     requestLogging: env['FUELTRACK_REQUEST_LOGGING'] !== 'false',
     seedDemo,
+    autoMigrate: env['FUELTRACK_AUTO_MIGRATE'] === 'true',
     devApiKey: devApiKey.length === 0 ? null : devApiKey,
     demoTenantId,
     dashboardDir: env['FUELTRACK_DASHBOARD_DIR']?.trim() || null,
@@ -269,6 +276,17 @@ async function getCachedApp(): Promise<Cached['app']> {
     minLogLevel: config.minLogLevel,
     clock: systemClock,
   });
+
+  if (config.autoMigrate) {
+    // Runs before the seed: on a database that was never migrated the seed is
+    // what produced the P2021 warnings this exists to prevent. Failures are
+    // logged and reported through /healthz rather than thrown, so a broken
+    // migration step still leaves the API reachable for diagnosis.
+    await autoMigrateOnBoot({
+      logger: dependencies.logger,
+      here: dirname(fileURLToPath(import.meta.url)),
+    });
+  }
 
   if (config.seedDemo && globalThis.__fueltrack_seeded__ !== true) {
     // Only remember the seed when every step passed (or already existed). If
