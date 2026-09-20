@@ -37,8 +37,9 @@ npm install
 npm run db:generate
 npm run db:deploy   # applies prisma/migrations/*
 
-# For Supabase production:
-DATABASE_URL=$DIRECT_URL npm run db:deploy
+# For Supabase production, Prisma uses DIRECT_URL (schema.prisma `directUrl`)
+# for migrations automatically, so no DATABASE_URL override is needed:
+npm run db:deploy
 ```
 
 Migrations:
@@ -146,7 +147,7 @@ npm run dev -w @fueltrack/web    # -> http://localhost:5173 with proxy to :3000
    FUELTRACK_LOG_LEVEL=info
    ```
 4. Deploy
-5. Run migration: locally with DIRECT_URL or via Vercel Build (prisma migrate deploy)
+5. Run migration: `prisma migrate deploy` uses `DIRECT_URL` via `directUrl` in `schema.prisma`
 6. Test: `https://your-app.vercel.app/healthz` -> `{"status":"ok"}`
 
 ## Step 7: Local Dev with Supabase
