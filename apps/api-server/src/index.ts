@@ -1,6 +1,12 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildServer, createPlatformDependencies, type PlatformDependencies } from '@fueltrack/api';
+import {
+  buildServer,
+  checkCredentialReadiness,
+  createCredentialStatusReader,
+  createPlatformDependencies,
+  type PlatformDependencies,
+} from '@fueltrack/api';
 import {
   API_KEY_SCOPES,
   autoMigrateOnBoot,
@@ -10,6 +16,7 @@ import {
   systemClock,
 } from '@fueltrack/core';
 import { DEMO_SITE_ID, readConfig, type ApiServerConfig } from './config.js';
+import { enforceCredentialRequirement } from './credential-gate.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DASHBOARD_DIR = join(here, '..', 'public');
@@ -122,12 +129,33 @@ export async function main(): Promise<void> {
     await seedDemoData(dependencies, config);
   }
 
+  // A server with no usable credential rejects every request with the same
+  // message as a wrong key. Verify the store before listening so the failure is
+  // reported once, with the remediation, instead of as a 401 storm.
+  const readiness = await checkCredentialReadiness(
+    {
+      apiKeys: dependencies.apiKeys,
+      logger: dependencies.logger,
+      context: {
+        deployment: 'server',
+        persistence: dependencies.persistence ?? 'memory',
+        demoSeedEnabled: config.seedDemo,
+        devApiKeyConfigured: config.devApiKey !== null,
+      },
+    },
+    { requireCredentials: config.requireCredentials },
+  );
+  enforceCredentialRequirement(config, readiness);
+
   const dashboardDir = config.dashboardDir ?? DEFAULT_DASHBOARD_DIR;
-  const app = await buildServer(dependencies, {
-    requestLogging: config.requestLogging,
-    minLogLevel: config.minLogLevel,
-    dashboardDir,
-  });
+  const app = await buildServer(
+    { ...dependencies, credentialStatus: createCredentialStatusReader(dependencies.apiKeys) },
+    {
+      requestLogging: config.requestLogging,
+      minLogLevel: config.minLogLevel,
+      dashboardDir,
+    },
+  );
 
   const shutdown = async (signal: string): Promise<void> => {
     dependencies.logger.info('server.shutdown.requested', { signal });

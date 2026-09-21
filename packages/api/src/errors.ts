@@ -1,6 +1,7 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   ConflictError,
+  CredentialsNotProvisionedError,
   ForbiddenError,
   formatIssues,
   NotFoundError,
@@ -66,6 +67,21 @@ export function registerErrorHandler(app: FastifyInstance, logger: Logger): void
           ...(requestId === undefined ? {} : { requestId }),
         };
         return reply.code(401).send(body);
+      }
+
+      if (error instanceof CredentialsNotProvisionedError) {
+        // A deployment fault, not a bad credential: the store holds no usable
+        // key, so no key the operator can paste would be accepted. Reported as
+        // 503 so a UI or probe can tell the two apart. The body carries no
+        // secret and no store internals, and it is independent of the presented
+        // credential, so it is not a credential oracle.
+        void reply.header('WWW-Authenticate', 'Bearer realm="fueltrack"');
+        const body: ErrorBody = {
+          error: 'credentials_not_provisioned',
+          message: 'This deployment has no API key provisioned',
+          ...(requestId === undefined ? {} : { requestId }),
+        };
+        return reply.code(503).send(body);
       }
 
       if (error instanceof ForbiddenError) {

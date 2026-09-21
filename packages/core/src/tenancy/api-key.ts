@@ -92,4 +92,12 @@ export interface ApiKeyRegistry {
   touchLastUsed(id: ApiKeyId, usedAt: string): Promise<void>;
   revoke(tenantId: TenantId, id: ApiKeyId): Promise<boolean>;
   list(tenantId: TenantId): Promise<ReadonlyArray<Omit<ApiKeyRecord, 'keyHash'>>>;
+  /**
+   * Number of credentials that could authenticate right now (active and not
+   * expired) across every tenant. Deployment diagnostics only: it answers "can
+   * anybody authenticate against this store at all", which is what separates a
+   * missing credential from a rejected one. Never used for authorization and
+   * never surfaced to an HTTP caller.
+   */
+  countUsable(): Promise<number>;
 }

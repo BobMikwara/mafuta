@@ -175,6 +175,9 @@ describe('persistence failure signature', () => {
       touchLastUsed: async () => {},
       revoke: async () => false,
       list: async () => [],
+      countUsable: async () => {
+        throw prismaInitializationError;
+      },
     };
 
     const deps = createPlatformDependencies({

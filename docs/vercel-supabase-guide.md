@@ -173,17 +173,19 @@ npm run dev -w @fueltrack/web    # -> http://localhost:5173 with proxy to :3000
    - Build Command: `npm run db:generate && npm run build` (from vercel.json)
    - Output Directory: `apps/web/dist`
    - Install Command: `npm ci`
-3. Env Vars (Production):
+3. Env Vars (Production). Set them for every environment that serves the API, otherwise a Preview deployment has no credential store and rejects the Production key. See [api-key-provisioning.md](api-key-provisioning.md) for the full reference.
    ```
    DATABASE_URL=postgresql://...:6543/postgres?pgbouncer=true
    DIRECT_URL=postgresql://...:5432/postgres
    USE_PRISMA=true
    FUELTRACK_AUTO_MIGRATE=true
+   FUELTRACK_REQUIRE_CREDENTIALS=true
    FUELTRACK_SEED_DEMO=true
    FUELTRACK_DEV_API_KEY=<16+ chars random>
    FUELTRACK_DEMO_TENANT_ID=demo-tenant
    FUELTRACK_LOG_LEVEL=info
    ```
+   `FUELTRACK_DEV_API_KEY` is only installed by the seed, so it does nothing on its own: `FUELTRACK_SEED_DEMO` must be `true`, or the key must be provisioned with `npm run key:provision`. For a real tenant prefer provisioning and leave the seed off.
 4. Deploy
 5. Run migration: `prisma migrate deploy` uses `DIRECT_URL` via `directUrl` in `schema.prisma`
 6. Test: `https://your-app.vercel.app/healthz` -> `{"status":"ok","persistence":"prisma","database":"up"}`.
@@ -218,6 +220,12 @@ node apps/simulator-runner/dist/index.js --api-url http://localhost:3000 --api-k
 
 ## Troubleshooting
 
+- `API key rejected. Check the key and try again. Valid API key credentials are required.` in the console while `/healthz`, `/` and the login screen work -> the presented key is not in the credential store the request was checked against. The store is either unprovisioned or not the one that was seeded. Diagnose in this order:
+  1. `GET /healthz`. `"credentials":"empty"` (HTTP 503, `status:"degraded"`) means no usable key exists in the deployment at all, so no key can be accepted: provision one with `npm run key:provision` or enable `FUELTRACK_SEED_DEMO=true` with `FUELTRACK_DEV_API_KEY`. `"credentials":"ready"` means other keys exist, so the pasted one is unknown, revoked or expired. `"credentials":"unavailable"` means the store could not be read: check `database` and `DATABASE_URL`.
+  2. Vercel > Project > Logs (Functions): `auth.rejected` carries the non-secret reason and how many usable credentials the store holds (`usableCredentials`). `0` is a provisioning fault, any other number is a wrong key.
+  3. `credentials.missing` names the misconfiguration in its `hint`. The two common ones: `FUELTRACK_DEV_API_KEY` is set but `FUELTRACK_SEED_DEMO` is not `true` (the key is only installed by the seed), and the key was provisioned for a different environment (Production versus Preview) or a different Vercel project that the console is actually talking to, which the console now shows as the `API: <origin>` part of the message.
+  4. `credentials.ephemeral_store` warns that the deployment is using in-memory persistence. Keys there are per instance and lost on cold start, so a key can be accepted by one request and rejected by the next: set `USE_PRISMA=true` and `DATABASE_URL`.
+  5. `seed.step_failed` with `step:"api-key"` means the seed could not store the credential (usually the `api_keys` table is missing because migrations were not applied). Run `npm run db:deploy`, then redeploy.
 - `No Output Directory named "build"` -> fixed by `vercel.json` outputDirectory `apps/web/dist`
 - `prisma generate` fails in Vercel -> ensure `buildCommand` includes it, and `@prisma/client` in dependencies
 - `Missing script: "db:generate"` with npm error location `packages/api` -> the Vercel Root Directory is set to `packages/api`. Clear it in Project Settings > General > Root Directory so the build runs from the repo root, where `db:generate` and the workspace build live. Root Directory cannot be set in `vercel.json`, it is a dashboard-only setting.

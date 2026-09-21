@@ -1,7 +1,13 @@
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
-import { buildServer, createPlatformDependencies, type PlatformDependencies } from '@fueltrack/api';
+import {
+  buildServer,
+  checkCredentialReadiness,
+  createCredentialStatusReader,
+  createPlatformDependencies,
+  type PlatformDependencies,
+} from '@fueltrack/api';
 import {
   API_KEY_SCOPES,
   autoMigrateOnBoot,
@@ -32,6 +38,13 @@ interface ApiServerConfig {
    * application code is an explicit operator decision, not a side effect.
    */
   readonly autoMigrate: boolean;
+  /**
+   * When true an empty credential store is reported loudly and through
+   * `/healthz`. Unlike the long-lived server this function cannot refuse to
+   * start usefully, because a throw during cold start turns every route into an
+   * opaque 500 and hides the remediation the operator needs.
+   */
+  readonly requireCredentials: boolean;
   readonly devApiKey: string | null;
   readonly demoTenantId: TenantId;
   readonly dashboardDir: string | null;
@@ -79,6 +92,7 @@ function readConfig(env: NodeJS.ProcessEnv = process.env): ApiServerConfig {
     requestLogging: env['FUELTRACK_REQUEST_LOGGING'] !== 'false',
     seedDemo,
     autoMigrate: env['FUELTRACK_AUTO_MIGRATE'] === 'true',
+    requireCredentials: env['FUELTRACK_REQUIRE_CREDENTIALS'] !== 'false',
     devApiKey: devApiKey.length === 0 ? null : devApiKey,
     demoTenantId,
     dashboardDir: env['FUELTRACK_DASHBOARD_DIR']?.trim() || null,
@@ -296,6 +310,26 @@ async function getCachedApp(): Promise<Cached['app']> {
     globalThis.__fueltrack_seeded__ = seeded;
   }
 
+  // Report the credential store before serving. Without this, a deployment that
+  // holds no usable key answers 401 "Valid API key credentials are required" to
+  // every request, which is indistinguishable from a wrong key and is precisely
+  // the failure this check exists to make obvious. It also warns when the store
+  // is the per-instance memory backend, where a key is not shared between
+  // serverless instances and does not survive a cold start.
+  await checkCredentialReadiness(
+    {
+      apiKeys: dependencies.apiKeys,
+      logger: dependencies.logger,
+      context: {
+        deployment: 'serverless',
+        persistence: dependencies.persistence ?? 'memory',
+        demoSeedEnabled: config.seedDemo,
+        devApiKeyConfigured: config.devApiKey !== null,
+      },
+    },
+    { requireCredentials: config.requireCredentials },
+  );
+
   const dashboardDir = findDashboardDir(config.dashboardDir);
 
   if (dashboardDir === null) {
@@ -306,11 +340,20 @@ async function getCachedApp(): Promise<Cached['app']> {
     dependencies.logger.info('dashboard.enabled', { dashboardDir });
   }
 
-  const app = await buildServer(dependencies, {
-    requestLogging: config.requestLogging,
-    minLogLevel: config.minLogLevel,
-    ...(dashboardDir === null ? {} : { dashboardDir }),
-  });
+  const app = await buildServer(
+    {
+      ...dependencies,
+      // A rejected credential is then explained as a provisioning fault when the
+      // store is empty, and `/healthz` stops reporting `ok` for a deployment
+      // that cannot authenticate anybody.
+      credentialStatus: createCredentialStatusReader(dependencies.apiKeys),
+    },
+    {
+      requestLogging: config.requestLogging,
+      minLogLevel: config.minLogLevel,
+      ...(dashboardDir === null ? {} : { dashboardDir }),
+    },
+  );
 
   await app.ready();
 

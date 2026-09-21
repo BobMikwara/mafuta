@@ -102,6 +102,26 @@ Coding standards from `rules.md` are enforced automatically by `npm run guardrai
 no `console.log`, no emoji, no em dashes, and no purple hues in source, styles, or
 documentation.
 
+## API keys
+
+Every `/v1` route requires a stored API key, so a deployment whose credential store is
+empty rejects every request with the same 401 a wrong key produces. Provisioning is
+therefore explicit and verifiable:
+
+```bash
+npm run build
+npm run key:provision -- --tenant demo-tenant --name console   # prints the key once
+cat key.txt | npm run key:verify -- --tenant demo-tenant       # is this key accepted here?
+npm run key:list -- --tenant demo-tenant                       # what is provisioned (no key material)
+```
+
+`GET /healthz` reports the credential store (`ready`, `empty`, `unavailable`) and answers
+503 while it is not `ready`, so an unprovisioned deployment cannot pass as a healthy one.
+With `FUELTRACK_REQUIRE_CREDENTIALS=true` (the default) the API server refuses to start at
+all when nothing is provisioned. See
+[docs/api-key-provisioning.md](docs/api-key-provisioning.md) for the remediation steps, the
+environment reference and the security properties.
+
 ## Security notes
 
 - The tenant of a request is derived only from a hashed API key. Client supplied tenant

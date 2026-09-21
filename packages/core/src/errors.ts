@@ -42,6 +42,21 @@ export class UnauthorizedError extends FuelTrackError {
   }
 }
 
+/**
+ * Raised when a deployment cannot authenticate anyone because its credential
+ * store is reachable but holds no usable API key. This is a provisioning fault,
+ * not a bad credential, so it must not be reported as `unauthorized`: operators
+ * spent hours re-checking a correct key that simply was never installed.
+ *
+ * It is not a credential oracle either. The condition depends only on the state
+ * of the store, never on the secret that was presented.
+ */
+export class CredentialsNotProvisionedError extends FuelTrackError {
+  constructor(message = 'This deployment has no API key provisioned') {
+    super(message);
+  }
+}
+
 export class ForbiddenError extends FuelTrackError {
   constructor(message = 'Access denied for this tenant') {
     super(message);

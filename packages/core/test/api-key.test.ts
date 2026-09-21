@@ -133,6 +133,43 @@ describe('api key registry', () => {
     expect(JSON.stringify(listed)).not.toContain(record.keyHash);
   });
 
+  it('counts only the credentials that could still authenticate', async () => {
+    const registry = createMemoryApiKeyRegistry({ clock: () => NOW });
+    const usable = generateApiKey({
+      tenantId: TENANT_A,
+      name: 'usable',
+      scopes: ['readings:read'],
+      createdAt: NOW.toISOString(),
+    });
+    const expired = generateApiKey({
+      tenantId: TENANT_A,
+      name: 'expired',
+      scopes: ['readings:read'],
+      createdAt: NOW.toISOString(),
+      expiresAt: '2025-12-31T00:00:00.000Z',
+    });
+    const revoked = generateApiKey({
+      tenantId: TENANT_B,
+      name: 'revoked',
+      scopes: ['readings:read'],
+      createdAt: NOW.toISOString(),
+    });
+    await registry.save(usable.record);
+    await registry.save(expired.record);
+    await registry.save(revoked.record);
+    await registry.revoke(TENANT_B, revoked.record.id);
+
+    expect(registry.size()).toBe(3);
+    // Deployment diagnostics count every tenant: the question is whether
+    // anybody at all can authenticate against this store.
+    expect(await registry.countUsable()).toBe(1);
+  });
+
+  it('reports zero usable credentials for an empty store', async () => {
+    const registry = createMemoryApiKeyRegistry({ clock: () => NOW });
+    expect(await registry.countUsable()).toBe(0);
+  });
+
   it('records the last time a credential was used', async () => {
     const registry = createMemoryApiKeyRegistry({ clock: () => NOW });
     const { record } = generateApiKey({
