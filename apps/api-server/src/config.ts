@@ -15,6 +15,14 @@ export interface ApiServerConfig {
    * default so migrating stays an explicit operator decision.
    */
   readonly autoMigrate: boolean;
+  /**
+   * Refuses to start when the credential store holds no usable API key. On by
+   * default: a server that rejects every request because nothing was ever
+   * provisioned looks exactly like a server with a bad key, and that ambiguity
+   * is what this flag removes. Set FUELTRACK_REQUIRE_CREDENTIALS=false to allow
+   * a credential-less start (for example while bootstrapping a new tenant).
+   */
+  readonly requireCredentials: boolean;
   /** Supplied by the operator. Never logged, never echoed to the dashboard. */
   readonly devApiKey: string | null;
   readonly demoTenantId: TenantId;
@@ -51,6 +59,24 @@ function readPort(raw: string | undefined): number {
   return port;
 }
 
+/**
+ * Strict boolean reader. A typo such as `flase` is rejected instead of being
+ * silently treated as the default, because the defaults here decide whether a
+ * deployment may serve traffic without a credential.
+ */
+function readBoolean(raw: string | undefined, name: string, fallback: boolean): boolean {
+  if (raw === undefined || raw === '') {
+    return fallback;
+  }
+  if (raw === 'true') {
+    return true;
+  }
+  if (raw === 'false') {
+    return false;
+  }
+  throw new ConfigurationError(`${name} must be "true" or "false"`);
+}
+
 export function readConfig(env: NodeJS.ProcessEnv = process.env): ApiServerConfig {
   const seedDemo = env['FUELTRACK_SEED_DEMO'] === 'true';
   const devApiKey = env['FUELTRACK_DEV_API_KEY']?.trim() ?? '';
@@ -78,6 +104,11 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ApiServerConfi
     requestLogging: env['FUELTRACK_REQUEST_LOGGING'] !== 'false',
     seedDemo,
     autoMigrate: env['FUELTRACK_AUTO_MIGRATE'] === 'true',
+    requireCredentials: readBoolean(
+      env['FUELTRACK_REQUIRE_CREDENTIALS'],
+      'FUELTRACK_REQUIRE_CREDENTIALS',
+      true,
+    ),
     devApiKey: devApiKey.length === 0 ? null : devApiKey,
     demoTenantId,
     dashboardDir: env['FUELTRACK_DASHBOARD_DIR']?.trim() || null,

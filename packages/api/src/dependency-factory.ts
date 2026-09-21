@@ -58,16 +58,21 @@ export interface PlatformDependenciesOptions {
   readonly usePrisma?: boolean;
 }
 
-function shouldUsePrisma(explicit?: boolean): boolean {
+/**
+ * Persistence selection, exported so tools that run outside a request (the
+ * credentials CLI) resolve the store from an explicit environment rather than
+ * from the ambient process, which keeps them testable and predictable.
+ */
+export function shouldUsePrisma(explicit?: boolean, env: NodeJS.ProcessEnv = process.env): boolean {
   if (explicit !== undefined) return explicit;
-  if (process.env['USE_PRISMA'] === 'true') return true;
-  if (process.env['DATABASE_URL']?.includes('supabase')) return true;
-  if (process.env['DATABASE_URL']?.startsWith('postgresql://')) {
+  if (env['USE_PRISMA'] === 'true') return true;
+  if (env['DATABASE_URL']?.includes('supabase')) return true;
+  if (env['DATABASE_URL']?.startsWith('postgresql://')) {
     // If DATABASE_URL is set and not the local docker default, prefer Prisma in production
     const isLocalDocker =
-      process.env['DATABASE_URL']?.includes('localhost:5432') &&
-      process.env['DATABASE_URL']?.includes('fueltrack_dev');
-    if (!isLocalDocker && process.env['NODE_ENV'] === 'production') return true;
+      env['DATABASE_URL']?.includes('localhost:5432') &&
+      env['DATABASE_URL']?.includes('fueltrack_dev');
+    if (!isLocalDocker && env['NODE_ENV'] === 'production') return true;
   }
   return false;
 }

@@ -29,6 +29,9 @@
     "db:deploy": "prisma migrate deploy",
     "db:drift": "prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url \"$SHADOW_DATABASE_URL\" --exit-code",
     "db:test": "vitest run prisma",
+    "key:provision": "node apps/api-server/dist/cli/credentials.js provision",
+    "key:verify": "node apps/api-server/dist/cli/credentials.js verify",
+    "key:list": "node apps/api-server/dist/cli/credentials.js list",
     "check": "npm run guardrails && npm run typecheck && npm run lint && npm run format:check && npm run coverage"
   },
   "devDependencies": {

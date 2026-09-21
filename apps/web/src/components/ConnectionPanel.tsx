@@ -1,14 +1,34 @@
 import { useState, useEffect } from 'react';
 
+import type { ServiceHealth } from '../lib/api';
+
 interface Props {
   apiKey: string;
   onConnect: (key: string) => void;
   onDisconnect: () => void;
   status: string;
   statusKind: 'idle' | 'ready' | 'error';
+  /** Result of the last `/healthz` call, or null when it could not be read. */
+  health: ServiceHealth | null;
 }
 
-export function ConnectionPanel({ apiKey, onConnect, onDisconnect, status, statusKind }: Props) {
+/** Plain-language state of the credential store on the server side. */
+function credentialSummary(health: ServiceHealth | null): string {
+  const state = health?.credentials;
+  if (state === 'ready') return 'a key is provisioned for this deployment';
+  if (state === 'empty') return 'no API key is provisioned for this deployment';
+  if (state === 'unavailable') return 'the API key store cannot be read by this deployment';
+  return 'API key store state unknown';
+}
+
+export function ConnectionPanel({
+  apiKey,
+  onConnect,
+  onDisconnect,
+  status,
+  statusKind,
+  health,
+}: Props) {
   const [input, setInput] = useState(apiKey);
 
   useEffect(() => {
@@ -56,6 +76,12 @@ export function ConnectionPanel({ apiKey, onConnect, onDisconnect, status, statu
       <p className={`status ${statusKind}`}>{status}</p>
       <p className="hint">
         API URL: <code>{import.meta.env.VITE_API_URL || window.location.origin}</code>
+      </p>
+      <p className="hint">
+        Server credentials: <code>{credentialSummary(health)}</code>
+        {health?.credentials === 'empty'
+          ? ' Provision one with npm run key:provision, or start the API with FUELTRACK_SEED_DEMO=true and FUELTRACK_DEV_API_KEY.'
+          : ''}
       </p>
     </section>
   );

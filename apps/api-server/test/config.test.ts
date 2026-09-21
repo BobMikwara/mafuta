@@ -67,6 +67,18 @@ describe('api server configuration', () => {
     expect(config.devApiKey).toBe('a'.repeat(24));
   });
 
+  it('requires credentials by default and allows an explicit opt out', () => {
+    // A server that cannot authenticate anybody rejects every request, so it
+    // must not start unless the operator opts out deliberately.
+    expect(readConfig({}).requireCredentials).toBe(true);
+    expect(readConfig({ FUELTRACK_REQUIRE_CREDENTIALS: 'true' }).requireCredentials).toBe(true);
+    expect(readConfig({ FUELTRACK_REQUIRE_CREDENTIALS: 'false' }).requireCredentials).toBe(false);
+    expect(readConfig({ FUELTRACK_REQUIRE_CREDENTIALS: '' }).requireCredentials).toBe(true);
+    expect(() => readConfig({ FUELTRACK_REQUIRE_CREDENTIALS: 'flase' })).toThrow(
+      ConfigurationError,
+    );
+  });
+
   it('rejects a demo tenant identifier that is not a valid identifier', () => {
     expect(() => readConfig({ FUELTRACK_DEMO_TENANT_ID: 'Not Valid' })).toThrow(ConfigurationError);
     expect(readConfig({ FUELTRACK_DEMO_TENANT_ID: 'acme-fuels' }).demoTenantId).toBe('acme-fuels');

@@ -61,6 +61,16 @@ export function createMemoryApiKeyRegistry(options?: { clock?: () => Date }): Me
         .filter((record) => record.tenantId === tenantId)
         .map(({ keyHash: _keyHash, ...rest }) => ({ ...rest, scopes: [...rest.scopes] }));
     },
+    async countUsable(): Promise<number> {
+      const current = now();
+      let usable = 0;
+      for (const record of records.values()) {
+        if (isApiKeyUsable(record, current)) {
+          usable += 1;
+        }
+      }
+      return usable;
+    },
     size: () => records.size,
   };
 }

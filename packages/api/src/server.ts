@@ -10,6 +10,7 @@ import {
   systemClock,
   type ApiKeyRegistry,
   type Clock,
+  type CredentialStatusReader,
   type IngestService as IngestServiceType,
   type Logger,
   type LogLevel,
@@ -31,23 +32,23 @@ const DEFAULT_BODY_LIMIT_BYTES = 65_536;
 const HEALTH_PROBE_TIMEOUT_MS = 3_000;
 
 /**
- * Races the readiness probe against a timeout. Resolves `true` only when the
- * probe resolves in time. The probe's rejection is intentionally swallowed
- * after being observed: detail belongs in platform logs, not HTTP responses.
+ * Races a probe against a timeout and yields `onTimeout` instead of hanging or
+ * throwing. The probe's rejection is intentionally swallowed after being
+ * observed: detail belongs in platform logs, not HTTP responses.
  */
-function probeWithTimeout(probe: () => Promise<void>, timeoutMs: number): Promise<boolean> {
-  return new Promise<boolean>((resolvePromise) => {
-    const timer = setTimeout(() => resolvePromise(false), timeoutMs);
+function withTimeout<T>(probe: () => Promise<T>, timeoutMs: number, onTimeout: T): Promise<T> {
+  return new Promise<T>((resolvePromise) => {
+    const timer = setTimeout(() => resolvePromise(onTimeout), timeoutMs);
     // A dangling health-probe timer must never keep a process or test alive.
     if (typeof timer.unref === 'function') timer.unref();
     void probe().then(
-      () => {
+      (value) => {
         clearTimeout(timer);
-        resolvePromise(true);
+        resolvePromise(value);
       },
       () => {
         clearTimeout(timer);
-        resolvePromise(false);
+        resolvePromise(onTimeout);
       },
     );
   });
@@ -64,20 +65,7 @@ async function probeSchema(
   if (probe === undefined) {
     return null;
   }
-  return new Promise<SchemaStatus | null>((resolvePromise) => {
-    const timer = setTimeout(() => resolvePromise(null), timeoutMs);
-    if (typeof timer.unref === 'function') timer.unref();
-    void probe().then(
-      (status) => {
-        clearTimeout(timer);
-        resolvePromise(status);
-      },
-      () => {
-        clearTimeout(timer);
-        resolvePromise(null);
-      },
-    );
-  });
+  return withTimeout(probe, timeoutMs, null);
 }
 
 /**
@@ -90,6 +78,27 @@ function describeSchema(status: SchemaStatus | undefined): string {
   if (status.status === 'unmigrated') return `missing:${status.missingTables.join(',')}`;
   return status.code === undefined ? status.reason : `${status.reason}:${status.code}`;
 }
+
+/**
+ * Races the readiness probe against a timeout. Resolves `true` only when the
+ * probe resolves in time, which is what `/healthz` turns into `up`/`down`.
+ */
+function probeWithTimeout(probe: () => Promise<void>, timeoutMs: number): Promise<boolean> {
+  return withTimeout(
+    async () => {
+      await probe();
+      return true;
+    },
+    timeoutMs,
+    false,
+  );
+}
+
+/**
+ * `/healthz` credential labels. `not_configured` means the process was built
+ * without a credential reader, which is the case for embedded and test servers.
+ */
+export type HealthCredentialsState = 'ready' | 'empty' | 'unavailable' | 'not_configured';
 
 export interface ServerDependencies {
   readonly repositories: Repositories;
@@ -116,6 +125,13 @@ export interface ServerDependencies {
    * failure while needing opposite operator actions.
    */
   readonly schemaStatus?: () => Promise<SchemaStatus>;
+  /**
+   * Optional credential-store reader. When supplied it is used twice: a
+   * rejected credential is explained as a provisioning fault when the store is
+   * empty, and `/healthz` reports the store so a deployment that cannot
+   * authenticate anybody is not mistaken for a healthy one.
+   */
+  readonly credentialStatus?: CredentialStatusReader;
 }
 
 export interface ServerOptions {
@@ -226,19 +242,22 @@ export async function buildServer(
     const persistence = dependencies.persistence ?? 'memory';
     const time = clock.now().toISOString();
 
-    if (dependencies.ready === undefined) {
-      return {
-        status: 'ok',
-        time,
-        persistence,
-        database: 'not_configured',
-      };
-    }
+    const database: 'up' | 'down' | 'unmigrated' | 'not_configured' =
+      dependencies.ready === undefined
+        ? 'not_configured'
+        : (await probeWithTimeout(dependencies.ready, HEALTH_PROBE_TIMEOUT_MS))
+          ? 'up'
+          : 'down';
 
-    const reachable = await probeWithTimeout(dependencies.ready, HEALTH_PROBE_TIMEOUT_MS);
-    if (!reachable) {
+    const credentials: HealthCredentialsState =
+      dependencies.credentialStatus === undefined
+        ? 'not_configured'
+        : ((await withTimeout(dependencies.credentialStatus, HEALTH_PROBE_TIMEOUT_MS, null))
+            ?.state ?? 'unavailable');
+
+    if (database === 'down') {
       logger.warn('http.health_probe_failed', { persistence });
-      return reply.code(503).send({ status: 'degraded', time, persistence, database: 'down' });
+      return reply.code(503).send({ status: 'degraded', time, persistence, database, credentials });
     }
 
     const schema = await probeSchema(dependencies.schemaStatus, HEALTH_PROBE_TIMEOUT_MS);
@@ -252,10 +271,18 @@ export async function buildServer(
       });
       return reply
         .code(503)
-        .send({ status: 'degraded', time, persistence, database: 'unmigrated' });
+        .send({ status: 'degraded', time, persistence, database: 'unmigrated', credentials });
     }
 
-    return { status: 'ok', time, persistence, database: 'up' };
+    // `empty` and `unavailable` are degraded because neither can authenticate a
+    // caller, and both used to look like a rejected API key from the outside. An
+    // unprovisioned store is reported once at boot (`credentials.missing`), so
+    // polling this endpoint does not repeat the warning; the body is the signal.
+    if (credentials === 'empty' || credentials === 'unavailable') {
+      return reply.code(503).send({ status: 'degraded', time, persistence, database, credentials });
+    }
+
+    return { status: 'ok', time, persistence, database, credentials };
   });
 
   const dashboardDir = options.dashboardDir;
@@ -289,7 +316,14 @@ export async function buildServer(
 
   await app.register(
     async (v1: FastifyInstance) => {
-      registerAuthentication(v1, { apiKeys: dependencies.apiKeys, logger, touchLastUsed: true });
+      registerAuthentication(v1, {
+        apiKeys: dependencies.apiKeys,
+        logger,
+        touchLastUsed: true,
+        ...(dependencies.credentialStatus === undefined
+          ? {}
+          : { credentialStatus: dependencies.credentialStatus }),
+      });
       registerSiteRoutes(v1, { fleet });
       registerTankRoutes(v1, { fleet, ingest });
       registerAlarmRoutes(v1, { fleet });

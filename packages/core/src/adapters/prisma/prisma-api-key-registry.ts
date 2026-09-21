@@ -115,5 +115,17 @@ export function createPrismaApiKeyRegistry(options?: { clock?: () => Date }): Ap
         return rest;
       });
     },
+
+    async countUsable(): Promise<number> {
+      const prisma = getPrismaClient();
+      // Mirrors isApiKeyUsable: active status and either no expiry or a future
+      // expiry. Kept as a count so no key material ever leaves the database.
+      return prisma.apiKey.count({
+        where: {
+          status: 'active',
+          OR: [{ expiresAt: null }, { expiresAt: { gt: now() } }],
+        },
+      });
+    },
   };
 }

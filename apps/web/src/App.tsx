@@ -6,10 +6,12 @@ import {
   fetchTanks,
   fetchReadings,
   fetchAlarms,
+  fetchHealth,
   normalizeApiKey,
   type Tank,
   type Reading,
   type Alarm,
+  type ServiceHealth,
 } from './lib/api';
 
 const STORAGE_KEY = 'fueltrack.apiKey';
@@ -30,7 +32,24 @@ export default function App() {
   const [alarms, setAlarms] = useState<Alarm[]>([]);
   const [status, setStatus] = useState('Enter API key to connect');
   const [statusKind, setStatusKind] = useState<'idle' | 'ready' | 'error'>('idle');
+  const [health, setHealth] = useState<ServiceHealth | null>(null);
   const timerRef = useRef<number | null>(null);
+
+  // The deployment health explains a rejection that has nothing to do with the
+  // pasted key, so it is fetched independently of the credentials.
+  useEffect(() => {
+    let active = true;
+    fetchHealth()
+      .then((result) => {
+        if (active) setHealth(result);
+      })
+      .catch(() => {
+        if (active) setHealth(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const refresh = useCallback(async (key: string) => {
     try {
@@ -124,6 +143,7 @@ export default function App() {
           onDisconnect={handleDisconnect}
           status={status}
           statusKind={statusKind}
+          health={health}
         />
 
         <TanksTable tanks={tanks} latestByTank={latestByTank} />
