@@ -10,12 +10,12 @@ import {
 import {
   API_KEY_SCOPES,
   autoMigrateOnBoot,
-  createSiteSchema,
+  createStationSchema,
   createTankSchema,
   parseInput,
   systemClock,
 } from '@fueltrack/core';
-import { DEMO_SITE_ID, readConfig, type ApiServerConfig } from './config.js';
+import { DEMO_STATION_ID, readConfig, type ApiServerConfig } from './config.js';
 import { enforceCredentialRequirement } from './credential-gate.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -32,13 +32,14 @@ async function seedDemoData(
   // unreachable or unmigrated database surfaces as an anonymous stack trace.
   const steps: ReadonlyArray<readonly [string, () => Promise<unknown>]> = [
     [
-      'site',
+      'station',
       () =>
-        dependencies.fleetService.createSite(
+        dependencies.fleetService.createStation(
           tenantId,
-          parseInput(createSiteSchema, {
-            id: DEMO_SITE_ID,
+          parseInput(createStationSchema, {
+            id: DEMO_STATION_ID,
             name: 'Demo Depot',
+            code: 'DEMO-01',
             timezone: 'Africa/Nairobi',
           }),
         ),
@@ -49,7 +50,7 @@ async function seedDemoData(
         dependencies.fleetService.createTank(
           tenantId,
           parseInput(createTankSchema, {
-            siteId: DEMO_SITE_ID,
+            stationId: DEMO_STATION_ID,
             name: 'Diesel Tank 1',
             product: 'diesel',
             geometry: { kind: 'vertical-cylinder', diameterMm: 2500, heightMm: 4000 },
@@ -63,7 +64,7 @@ async function seedDemoData(
         dependencies.fleetService.createTank(
           tenantId,
           parseInput(createTankSchema, {
-            siteId: DEMO_SITE_ID,
+            stationId: DEMO_STATION_ID,
             name: 'Petrol 95 Tank 2',
             product: 'petrol-95',
             geometry: { kind: 'vertical-cylinder', diameterMm: 2200, heightMm: 3600 },
@@ -103,7 +104,7 @@ async function seedDemoData(
 
   dependencies.logger.info('demo.seeded', {
     tenantId,
-    siteId: DEMO_SITE_ID,
+    stationId: DEMO_STATION_ID,
     keyId: issued.record.id,
     note: 'The seeded key secret was supplied by the operator and is never logged',
   });
@@ -170,7 +171,7 @@ export async function main(): Promise<void> {
     host: config.host,
     port: config.port,
     demoDataSeeded: config.seedDemo,
-    persistence: 'in-memory',
+    persistence: dependencies.persistence ?? 'memory',
   });
 }
 

@@ -3,7 +3,9 @@
 These are recommended hooks. Implement them using the selected agent framework or repository tooling.
 
 ## Pre-commit
+
 Run:
+
 1. Secret scan.
 2. Formatting check.
 3. ESLint.
@@ -15,7 +17,9 @@ Run:
 Reject the commit if any mandatory check fails.
 
 ## Pre-push
+
 Run:
+
 1. Full unit tests.
 2. Integration tests.
 3. Prisma schema validation.
@@ -23,7 +27,9 @@ Run:
 5. Dependency vulnerability check where configured.
 
 ## Pre-deploy
+
 Run:
+
 1. CI status verification.
 2. Database migration review.
 3. Environment variable verification without printing secret values.
@@ -33,7 +39,9 @@ Run:
 7. Confirm backups and monitoring.
 
 ## Post-deploy
+
 Run:
+
 1. Health check.
 2. Readiness check.
 3. Database connectivity check.

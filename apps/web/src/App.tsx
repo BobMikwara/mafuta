@@ -151,8 +151,8 @@ export default function App() {
         <AlarmsList alarms={alarms} />
 
         <p className="footnote">
-          Values tagged as <code>simulated</code> are synthetic and never presented as device measurements.
-          Backend: Fastify on Vercel serverless, DB: Supabase Postgres via Prisma.
+          Values tagged as <code>simulated</code> are synthetic and never presented as device
+          measurements. Backend: Fastify on Vercel serverless, DB: Supabase Postgres via Prisma.
         </p>
       </main>
     </div>

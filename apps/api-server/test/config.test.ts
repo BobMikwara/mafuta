@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ConfigurationError, DEMO_SITE_ID, readConfig } from '../src/config.js';
+import { ConfigurationError, DEMO_STATION_ID, readConfig } from '../src/config.js';
 
 describe('api server configuration', () => {
   it('applies safe defaults with no environment', () => {
@@ -91,7 +91,7 @@ describe('api server configuration', () => {
     expect(config.devApiKey).toBe('a'.repeat(24));
   });
 
-  it('exposes the demo site identifier used by the seeder', () => {
-    expect(DEMO_SITE_ID).toBe('demo-site');
+  it('exposes the demo station identifier used by the seeder', () => {
+    expect(DEMO_STATION_ID).toBe('demo-station');
   });
 });

@@ -13,7 +13,7 @@ import {
   runWithTenantContext,
   type TenantContext,
 } from '../src/tenancy/tenant-context.js';
-import { makeReading, makeSite, makeTank, TENANT_A, TENANT_B } from './factories.js';
+import { makeAlert, makeReading, makeStation, makeTank, TENANT_A, TENANT_B } from './factories.js';
 
 const CONTEXT_A: TenantContext = {
   tenantId: TENANT_A,
@@ -25,21 +25,21 @@ const CONTEXT_A: TenantContext = {
 describe('tenant guard helpers', () => {
   it('accepts an entity owned by the tenant', () => {
     expect(() =>
-      assertOwnedByTenant(TENANT_A, makeSite({ tenantId: TENANT_A }), 'test'),
+      assertOwnedByTenant(TENANT_A, makeStation({ tenantId: TENANT_A }), 'test'),
     ).not.toThrow();
   });
 
   it('rejects an entity owned by another tenant', () => {
-    expect(() => assertOwnedByTenant(TENANT_A, makeSite({ tenantId: TENANT_B }), 'test')).toThrow(
-      TenantIsolationError,
-    );
+    expect(() =>
+      assertOwnedByTenant(TENANT_A, makeStation({ tenantId: TENANT_B }), 'test'),
+    ).toThrow(TenantIsolationError);
   });
 
   it('validates every element of a collection', () => {
     expect(() =>
       assertAllOwnedByTenant(
         TENANT_A,
-        [makeSite({ tenantId: TENANT_A }), makeSite({ tenantId: TENANT_B })],
+        [makeStation({ tenantId: TENANT_A }), makeStation({ tenantId: TENANT_B })],
         'test',
       ),
     ).toThrow(TenantIsolationError);
@@ -47,8 +47,8 @@ describe('tenant guard helpers', () => {
 
   it('filters collections down to a single tenant', () => {
     const filtered = filterByTenant(TENANT_A, [
-      makeSite({ id: 'site-a' as never, tenantId: TENANT_A }),
-      makeSite({ id: 'site-b' as never, tenantId: TENANT_B }),
+      makeStation({ id: 'station-a' as never, tenantId: TENANT_A }),
+      makeStation({ id: 'station-b' as never, tenantId: TENANT_B }),
     ]);
     expect(filtered).toHaveLength(1);
     expect(filtered[0]?.tenantId).toBe(TENANT_A);
@@ -80,29 +80,29 @@ describe('tenant context', () => {
 describe('repository tenant isolation', () => {
   it('returns only rows belonging to the requesting tenant', async () => {
     const repositories = createMemoryRepositories();
-    await repositories.sites.save(
+    await repositories.stations.save(
       TENANT_A,
-      makeSite({ id: 'site-a' as never, tenantId: TENANT_A }),
+      makeStation({ id: 'station-a' as never, tenantId: TENANT_A }),
     );
-    await repositories.sites.save(
+    await repositories.stations.save(
       TENANT_B,
-      makeSite({ id: 'site-b' as never, tenantId: TENANT_B }),
+      makeStation({ id: 'station-b' as never, tenantId: TENANT_B }),
     );
 
-    const tenantA = await repositories.sites.list(TENANT_A);
-    const tenantB = await repositories.sites.list(TENANT_B);
+    const tenantA = await repositories.stations.list(TENANT_A);
+    const tenantB = await repositories.stations.list(TENANT_B);
 
-    expect(tenantA.map((site) => site.id)).toEqual(['site-a']);
-    expect(tenantB.map((site) => site.id)).toEqual(['site-b']);
+    expect(tenantA.map((station) => station.id)).toEqual(['station-a']);
+    expect(tenantB.map((station) => station.id)).toEqual(['station-b']);
   });
 
   it('returns null when a tenant asks for another tenant row by id', async () => {
     const repositories = createMemoryRepositories();
-    const siteB = makeSite({ id: 'site-b' as never, tenantId: TENANT_B });
-    await repositories.sites.save(TENANT_B, siteB);
+    const stationB = makeStation({ id: 'station-b' as never, tenantId: TENANT_B });
+    await repositories.stations.save(TENANT_B, stationB);
 
-    expect(await repositories.sites.findById(TENANT_A, siteB.id)).toBeNull();
-    expect((await repositories.sites.findById(TENANT_B, siteB.id))?.id).toBe('site-b');
+    expect(await repositories.stations.findById(TENANT_A, stationB.id)).toBeNull();
+    expect((await repositories.stations.findById(TENANT_B, stationB.id))?.id).toBe('station-b');
   });
 
   it('refuses to persist a tank whose tenant does not match the caller', async () => {
@@ -119,22 +119,10 @@ describe('repository tenant isolation', () => {
     ).rejects.toThrow(TenantIsolationError);
   });
 
-  it('refuses to persist an alarm whose tenant does not match the caller', async () => {
+  it('refuses to persist an alert whose tenant does not match the caller', async () => {
     const repositories = createMemoryRepositories();
-    const alarm = {
-      id: 'alm-1' as never,
-      tenantId: TENANT_B,
-      tankId: makeTank().id,
-      type: 'low-level' as const,
-      severity: 'warning' as const,
-      status: 'open' as const,
-      message: 'cross tenant attempt',
-      raisedAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-      readingId: null,
-      metrics: {},
-    };
-    await expect(repositories.alarms.save(TENANT_A, alarm)).rejects.toThrow(TenantIsolationError);
+    const alert = makeAlert({ id: 'alt-cross' as never, tenantId: TENANT_B });
+    await expect(repositories.alerts.save(TENANT_A, alert)).rejects.toThrow(TenantIsolationError);
   });
 
   it('scopes reading history to the tenant and the tank', async () => {
@@ -159,10 +147,10 @@ describe('repository tenant isolation', () => {
 
   it('returns copies so a caller cannot mutate stored state', async () => {
     const repositories = createMemoryRepositories();
-    const site = makeSite();
-    await repositories.sites.save(TENANT_A, site);
-    const loaded = await repositories.sites.findById(TENANT_A, site.id);
-    expect(loaded).not.toBe(site);
-    expect(loaded?.name).toBe(site.name);
+    const station = makeStation();
+    await repositories.stations.save(TENANT_A, station);
+    const loaded = await repositories.stations.findById(TENANT_A, station.id);
+    expect(loaded).not.toBe(station);
+    expect(loaded?.name).toBe(station.name);
   });
 });

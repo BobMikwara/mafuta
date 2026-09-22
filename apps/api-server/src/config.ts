@@ -1,4 +1,4 @@
-import { toTenantId, toSiteId, type TenantId } from '@fueltrack/core';
+import { toStationId, toTenantId, type StationId, type TenantId } from '@fueltrack/core';
 
 /**
  * Environment driven configuration. Every value has a safe default and invalid
@@ -115,4 +115,8 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ApiServerConfi
   };
 }
 
-export const DEMO_SITE_ID = toSiteId('demo-site');
+/**
+ * Station created by the demo seed. Stable so that restarting the server reuses
+ * the same station instead of creating a second one.
+ */
+export const DEMO_STATION_ID: StationId = toStationId('demo-station');

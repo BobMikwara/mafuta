@@ -1,6 +1,7 @@
 # Project Memory
 
 ## Product context
+
 - Project name: FuelTrack EA, working name.
 - Market: Tanzania first, then East Africa.
 - Initial product: tank monitoring.
@@ -13,6 +14,7 @@
 - Initial development should use a simulator.
 
 ## Product decisions
+
 - Use a modular monolith initially.
 - Use TypeScript.
 - Use PostgreSQL and Prisma.
@@ -22,6 +24,7 @@
 - Build for multi-tenancy from the beginning.
 
 ## Open decisions
+
 - Exact hardware vendor and model.
 - Whether to use NestJS or Fastify.
 - Whether MQTT is needed for the first hardware gateway.
@@ -32,6 +35,7 @@
 - Dispenser/POS vendor integrations.
 
 ## Working preferences
+
 - No emojis.
 - No purple hues in frontend.
 - No em dashes.

@@ -3,16 +3,23 @@ import { err, isErr, isOk, mapResult, ok, unwrapOr, type Result } from '../src/t
 import {
   isIdentifier,
   newId,
-  toAlarmId,
+  toAlertId,
   toDeviceId,
   toReadingId,
-  toSiteId,
+  toStationId,
   toTankId,
   toTenantId,
 } from '../src/types/ids.js';
 import { InvalidIdentifierError } from '../src/errors.js';
 import { fixedClock, manualClock, systemClock, toIsoString } from '../src/ports/clock.js';
-import { assertCapacityWithinGeometry, fillPercent, isTankActive } from '../src/domain/tank.js';
+import {
+  assertCapacityWithinGeometry,
+  fillPercent,
+  isTankActive,
+  usableCapacityMl,
+  stockStatus,
+  freeCapacityMl,
+} from '../src/domain/tank.js';
 import { tankCapacityLitres, type TankGeometry } from '../src/domain/geometry.js';
 import { makeTank } from './factories.js';
 
@@ -43,11 +50,11 @@ describe('result helpers', () => {
 describe('identifier branding', () => {
   it('accepts lowercase identifiers with hyphens', () => {
     expect(toTenantId('tenant-a')).toBe('tenant-a');
-    expect(toSiteId('site-1')).toBe('site-1');
+    expect(toStationId('station-1')).toBe('station-1');
     expect(toTankId('tank-1')).toBe('tank-1');
     expect(toDeviceId('probe-1')).toBe('probe-1');
     expect(toReadingId('rdg-1')).toBe('rdg-1');
-    expect(toAlarmId('alm-1')).toBe('alm-1');
+    expect(toAlertId('alt-1')).toBe('alt-1');
   });
 
   it('rejects empty, uppercase, short and oversized identifiers', () => {
@@ -101,6 +108,17 @@ describe('tank helpers', () => {
   it('computes fill percentage against usable capacity', () => {
     const tank = makeTank({ capacityLitres: 10_000 });
     expect(fillPercent(tank, 2500)).toBe(25);
+    // The millilitre view of the same tank is exact.
+    expect(usableCapacityMl(tank)).toBe(10_000_000);
+    expect(freeCapacityMl(tank, 2_500_000)).toBe(7_500_000);
+  });
+
+  it('classifies stock against the configured thresholds', () => {
+    const tank = makeTank({ capacityLitres: 10_000 });
+    expect(stockStatus(tank, 900_000)).toBe('critical');
+    expect(stockStatus(tank, 1_500_000)).toBe('low');
+    expect(stockStatus(tank, 5_000_000)).toBe('normal');
+    expect(stockStatus(tank, 9_800_000)).toBe('high');
   });
 
   it('guards against a zero capacity tank', () => {

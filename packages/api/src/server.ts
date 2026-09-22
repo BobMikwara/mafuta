@@ -2,11 +2,19 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import {
+  AlertSweepService,
+  AuditService,
   createLogger,
   createStdioSink,
+  createRateLimiter,
+  enforceRateLimit,
+  DashboardService,
+  DeviceService,
+  EventService,
   FleetService,
   IngestService,
   newId,
+  ReportService,
   systemClock,
   type ApiKeyRegistry,
   type Clock,
@@ -14,14 +22,20 @@ import {
   type IngestService as IngestServiceType,
   type Logger,
   type LogLevel,
+  type RateLimiter,
   type Repositories,
   type SchemaStatus,
 } from '@fueltrack/core';
 import { registerAuthentication } from './auth.js';
 import { registerErrorHandler } from './errors.js';
-import { registerSiteRoutes } from './routes/sites.js';
+import { registerStationRoutes } from './routes/stations.js';
 import { registerTankRoutes } from './routes/tanks.js';
-import { registerAlarmRoutes } from './routes/alarms.js';
+import { registerAlertRoutes } from './routes/alerts.js';
+import { registerDeviceRoutes } from './routes/devices.js';
+import { registerEventRoutes } from './routes/events.js';
+import { registerDashboardRoutes } from './routes/dashboard.js';
+import { registerReportRoutes } from './routes/reports.js';
+import { registerAuditRoutes } from './routes/audit.js';
 
 const DEFAULT_BODY_LIMIT_BYTES = 65_536;
 /**
@@ -107,6 +121,17 @@ export interface ServerDependencies {
   readonly logger?: Logger;
   readonly fleetService?: FleetService;
   readonly ingestService?: IngestServiceType;
+  readonly deviceService?: DeviceService;
+  readonly eventService?: EventService;
+  readonly dashboardService?: DashboardService;
+  readonly reportService?: ReportService;
+  readonly auditService?: AuditService;
+  readonly alertSweepService?: AlertSweepService;
+  /**
+   * Secret used to salt the client-address hash written to the audit trail. No
+   * secret means no address is stored at all, which is the safer default.
+   */
+  readonly auditHashSecret?: string;
   /**
    * Label of the persistence backend (`'prisma'`, `'memory'`, ...), reported
    * by `/healthz` so operators can verify which store a deployment is using.
@@ -145,8 +170,26 @@ export interface ServerOptions {
    * index.html, dashboard.js and dashboard.css. Disabled unless supplied.
    */
   readonly dashboardDir?: string;
+  /** Ingestion throttling. Enabled by default; pass `null` to disable. */
+  readonly ingestionLimiter?: RateLimiter | null;
+  /** General per-credential throttling. Enabled by default; `null` disables. */
+  readonly apiLimiter?: RateLimiter | null;
+  /** Failed-authentication throttling. Disabled unless supplied. */
+  readonly authLimiter?: RateLimiter | null;
+  /**
+   * Interval in milliseconds for the in-process alert sweep. The sweep raises
+   * stale-data and device-offline alerts for tanks that have stopped reporting,
+   * which ingest can never do. `0` disables it.
+   */
+  readonly alertSweepIntervalMs?: number;
 }
 
+/**
+ * Ten minutes. The sweep is cheap (it reads the recent window per active tank
+ * and only writes when something changed), and it must be shorter than the
+ * shortest stale-after threshold the platform allows a tank to configure.
+ */
+const DEFAULT_SWEEP_INTERVAL_MS = 10 * 60_000;
 const DASHBOARD_FILES = new Set(['dashboard.js', 'dashboard.css']);
 const DASHBOARD_CSP =
   "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'";
@@ -173,6 +216,41 @@ export async function buildServer(
   const ingest =
     dependencies.ingestService ??
     new IngestService({ repositories: dependencies.repositories, clock, logger });
+  const devices =
+    dependencies.deviceService ??
+    new DeviceService({ repositories: dependencies.repositories, clock, logger });
+  const events =
+    dependencies.eventService ??
+    new EventService({ repositories: dependencies.repositories, clock, logger });
+  const dashboard =
+    dependencies.dashboardService ??
+    new DashboardService({
+      repositories: dependencies.repositories,
+      clock,
+      logger,
+      fleetService: fleet,
+    });
+  const reports =
+    dependencies.reportService ??
+    new ReportService({
+      repositories: dependencies.repositories,
+      clock,
+      logger,
+      fleetService: fleet,
+      deviceService: devices,
+      eventService: events,
+    });
+  const audit =
+    dependencies.auditService ??
+    new AuditService({ auditLogs: dependencies.repositories.auditLogs, clock, logger });
+  const sweep =
+    dependencies.alertSweepService ??
+    new AlertSweepService({
+      repositories: dependencies.repositories,
+      clock,
+      logger,
+      ingestService: ingest,
+    });
 
   const app = Fastify({
     logger: false,
@@ -323,13 +401,75 @@ export async function buildServer(
         ...(dependencies.credentialStatus === undefined
           ? {}
           : { credentialStatus: dependencies.credentialStatus }),
+        ...(options.authLimiter === undefined || options.authLimiter === null
+          ? {}
+          : { authLimiter: options.authLimiter }),
       });
-      registerSiteRoutes(v1, { fleet });
-      registerTankRoutes(v1, { fleet, ingest });
-      registerAlarmRoutes(v1, { fleet });
+
+      // Registered after authentication so `tenantContext` is always set here.
+      // A credential that has exhausted its budget is refused before any query
+      // runs, which is the only way a rate limit actually protects the database.
+      const apiLimiter =
+        options.apiLimiter === null
+          ? undefined
+          : (options.apiLimiter ?? createRateLimiter({ limit: 600, windowSeconds: 60 }));
+      if (apiLimiter !== undefined) {
+        v1.addHook('onRequest', async (request: FastifyRequest) => {
+          const identity = request.tenantContext?.apiKeyId ?? `ip:${request.ip}`;
+          enforceRateLimit(apiLimiter, `api:${identity}`);
+        });
+      }
+      const ingestionLimiter =
+        options.ingestionLimiter === null
+          ? undefined
+          : (options.ingestionLimiter ?? createRateLimiter({ limit: 300, windowSeconds: 60 }));
+      const shared = {
+        audit,
+        ...(dependencies.auditHashSecret === undefined
+          ? {}
+          : { ipHashSecret: dependencies.auditHashSecret }),
+      };
+      registerStationRoutes(v1, { fleet, ...shared });
+      registerTankRoutes(v1, {
+        fleet,
+        ingest,
+        dashboard,
+        ...shared,
+        ...(ingestionLimiter === undefined ? {} : { ingestionLimiter }),
+      });
+      registerAlertRoutes(v1, { fleet, sweep, ...shared });
+      registerDeviceRoutes(v1, { devices, ...shared });
+      registerEventRoutes(v1, { events, ...shared });
+      registerDashboardRoutes(v1, { dashboard });
+      registerReportRoutes(v1, { reports, ...shared });
+      registerAuditRoutes(v1, { audit });
     },
     { prefix: '/v1' },
   );
+
+  const sweepIntervalMs = options.alertSweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS;
+  if (sweepIntervalMs > 0) {
+    const timer = setInterval(() => {
+      void sweep
+        .sweepAllTenants()
+        .then((result) => {
+          if (result.failingTanks > 0) {
+            logger.warn('alert.sweep.partial', { failingTanks: result.failingTanks });
+          }
+        })
+        .catch((error: unknown) => {
+          logger.error('alert.sweep.failed', {
+            reason: error instanceof Error ? error.name : 'unknown',
+          });
+        });
+    }, sweepIntervalMs);
+    // A background timer must never hold a process open, and it must stop when
+    // the server closes so tests do not leak intervals.
+    timer.unref();
+    app.addHook('onClose', async () => {
+      clearInterval(timer);
+    });
+  }
 
   await app.ready();
   return app;

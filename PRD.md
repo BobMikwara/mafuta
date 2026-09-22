@@ -1,9 +1,11 @@
 # Product Requirements Document: FuelTrack EA
 
 ## 1. Product overview
+
 FuelTrack EA is a multi-tenant SaaS platform for monitoring fuel levels in petrol-station tanks. It will initially ingest tank readings from a simulator and later from multiple hardware vendors. It will support Tanzania first and be configurable for East African markets.
 
 ## 2. Users
+
 - Platform administrator
 - Company administrator
 - Station manager
@@ -12,6 +14,7 @@ FuelTrack EA is a multi-tenant SaaS platform for monitoring fuel levels in petro
 - Future: installation technician and support agent
 
 ## 3. Goals
+
 - Display current tank inventory.
 - Retain historical readings.
 - Show data freshness and device health.
@@ -22,6 +25,7 @@ FuelTrack EA is a multi-tenant SaaS platform for monitoring fuel levels in petro
 - Provide transparent distinction between measured, recorded, estimated, and inferred values.
 
 ## 4. Non-goals for MVP
+
 - Exact pump sales integration.
 - Automated regulatory or tax reporting.
 - Automatic declaration of theft.
@@ -33,6 +37,7 @@ FuelTrack EA is a multi-tenant SaaS platform for monitoring fuel levels in petro
 ## 5. MVP functional requirements
 
 ### Tenant and access management
+
 - Create, update, suspend, and view tenants.
 - Create stations under a tenant.
 - Create users and assign roles.
@@ -41,6 +46,7 @@ FuelTrack EA is a multi-tenant SaaS platform for monitoring fuel levels in petro
 - Record privileged actions in audit logs.
 
 ### Tank management
+
 - Create tanks with product type, capacity, station, and timezone.
 - Assign a device or probe to a tank.
 - Track assignment history.
@@ -48,6 +54,7 @@ FuelTrack EA is a multi-tenant SaaS platform for monitoring fuel levels in petro
 - Support calibration metadata without pretending calibration is validated.
 
 ### Device management
+
 - Register devices with manufacturer, model, serial number, protocol, and status.
 - Track last-seen time and connection health.
 - Support multiple protocol adapters.
@@ -56,6 +63,7 @@ FuelTrack EA is a multi-tenant SaaS platform for monitoring fuel levels in petro
 - Reject unauthorized or incorrectly assigned device data.
 
 ### Reading ingestion
+
 - Accept normalized readings through authenticated ingestion.
 - Validate timestamp, volume, level, temperature, water level, and quality fields.
 - Handle duplicate messages idempotently.
@@ -64,6 +72,7 @@ FuelTrack EA is a multi-tenant SaaS platform for monitoring fuel levels in petro
 - Support HTTP and MQTT adapter patterns where compatible with hardware.
 
 ### Dashboard
+
 - Show tenant, station, and tank summaries.
 - Show current volume, capacity, fill percentage, last reading time, and quality.
 - Clearly display stale or unavailable readings.
@@ -73,6 +82,7 @@ FuelTrack EA is a multi-tenant SaaS platform for monitoring fuel levels in petro
 - Avoid purple hues and avoid emoji-based status indicators.
 
 ### Events and inventory
+
 - Detect candidate delivery events using sustained increases and contextual checks.
 - Detect candidate unexplained decreases.
 - Store event confidence, evidence, and status.
@@ -81,6 +91,7 @@ FuelTrack EA is a multi-tenant SaaS platform for monitoring fuel levels in petro
 - Never label an event as theft without human investigation and evidence.
 
 ### Alerts
+
 - Low stock.
 - Critical stock.
 - Device offline.
@@ -92,6 +103,7 @@ FuelTrack EA is a multi-tenant SaaS platform for monitoring fuel levels in petro
 - Alert acknowledgement, assignment, resolution, and audit trail.
 
 ### Reporting
+
 - Current inventory.
 - Historical inventory.
 - Delivery candidates and confirmed deliveries.
@@ -101,6 +113,7 @@ FuelTrack EA is a multi-tenant SaaS platform for monitoring fuel levels in petro
 - CSV export with access control and audit logging.
 
 ## 6. Future requirements
+
 - Dispensers, nozzles, pump totalizers, and POS transactions.
 - Product-to-tank mapping.
 - Exact sales reconciliation where source data is available.
@@ -111,6 +124,7 @@ FuelTrack EA is a multi-tenant SaaS platform for monitoring fuel levels in petro
 - Advanced analytics.
 
 ## 7. Non-functional requirements
+
 - Strong tenant isolation.
 - Secure authentication and authorization.
 - TLS for network communication.
@@ -123,6 +137,7 @@ FuelTrack EA is a multi-tenant SaaS platform for monitoring fuel levels in petro
 - Clear data retention and deletion policies.
 
 ## 8. Acceptance principles
+
 - No feature is accepted without tests.
 - No live status is shown without a freshness indicator.
 - Calculated values show their formula and source where practical.

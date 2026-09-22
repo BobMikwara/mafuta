@@ -63,6 +63,20 @@ export class ForbiddenError extends FuelTrackError {
   }
 }
 
+/**
+ * Raised when a caller exceeds a configured rate limit. The retry delay is part
+ * of the error so the HTTP layer can answer 429 with a `Retry-After` header
+ * instead of leaving a device to guess when it may try again.
+ */
+export class TooManyRequestsError extends FuelTrackError {
+  constructor(
+    message: string,
+    public readonly retryAfterSeconds: number,
+  ) {
+    super(message);
+  }
+}
+
 export class ConflictError extends FuelTrackError {
   constructor(message: string) {
     super(message);

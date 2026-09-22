@@ -49,7 +49,15 @@ describe('platform dependencies', () => {
     const deps = createPlatformDependencies({ logger: createSilentLogger() });
     expect(deps.fleetService).toBeDefined();
     expect(deps.ingestService).toBeDefined();
-    expect(await deps.fleetService.listSites(TENANT)).toEqual([]);
+    expect(deps.deviceService).toBeDefined();
+    expect(deps.eventService).toBeDefined();
+    expect(deps.dashboardService).toBeDefined();
+    expect(deps.reportService).toBeDefined();
+    expect(deps.auditService).toBeDefined();
+    expect(deps.alertSweepService).toBeDefined();
+    // Every service shares one store, so a tank created through the fleet
+    // service is visible to ingestion and to the dashboard.
+    expect(await deps.fleetService.listStations(TENANT, { limit: 100 })).toEqual([]);
   });
 
   it('does not resolve an unrelated tenant credential', async () => {

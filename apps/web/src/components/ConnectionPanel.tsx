@@ -67,7 +67,9 @@ export function ConnectionPanel({
             spellCheck={false}
             className="input"
           />
-          <button type="submit" className="btn primary">Connect</button>
+          <button type="submit" className="btn primary">
+            Connect
+          </button>
           <button type="button" className="btn" onClick={onDisconnect}>
             Clear
           </button>

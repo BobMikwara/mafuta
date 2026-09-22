@@ -12,11 +12,11 @@ import {
   API_KEY_SCOPES,
   autoMigrateOnBoot,
   ConflictError,
-  createSiteSchema,
+  createStationSchema,
   createTankSchema,
   parseInput,
   systemClock,
-  toSiteId,
+  toStationId,
   toTenantId,
   type Logger,
   type TenantId,
@@ -99,7 +99,7 @@ function readConfig(env: NodeJS.ProcessEnv = process.env): ApiServerConfig {
   };
 }
 
-const DEMO_SITE_ID = toSiteId('demo-site');
+const DEMO_STATION_ID = toStationId('demo-station');
 
 // ---------------------------------------------------------------------------
 // Dashboard directory resolution for Vercel environment
@@ -203,12 +203,13 @@ async function seedDemoData(
   const outcomes: SeedOutcome[] = [];
 
   outcomes.push(
-    await seedStep(logger, 'site', () =>
-      dependencies.fleetService.createSite(
+    await seedStep(logger, 'station', () =>
+      dependencies.fleetService.createStation(
         tenantId,
-        parseInput(createSiteSchema, {
-          id: DEMO_SITE_ID,
+        parseInput(createStationSchema, {
+          id: DEMO_STATION_ID,
           name: 'Demo Depot',
+          code: 'DEMO-01',
           timezone: 'Africa/Nairobi',
         }),
       ),
@@ -220,7 +221,7 @@ async function seedDemoData(
       dependencies.fleetService.createTank(
         tenantId,
         parseInput(createTankSchema, {
-          siteId: DEMO_SITE_ID,
+          stationId: DEMO_STATION_ID,
           name: 'Diesel Tank 1',
           product: 'diesel',
           geometry: { kind: 'vertical-cylinder', diameterMm: 2500, heightMm: 4000 },
@@ -235,7 +236,7 @@ async function seedDemoData(
       dependencies.fleetService.createTank(
         tenantId,
         parseInput(createTankSchema, {
-          siteId: DEMO_SITE_ID,
+          stationId: DEMO_STATION_ID,
           name: 'Petrol 95 Tank 2',
           product: 'petrol-95',
           geometry: { kind: 'vertical-cylinder', diameterMm: 2200, heightMm: 3600 },
@@ -256,7 +257,7 @@ async function seedDemoData(
         });
         logger.info('demo.seeded', {
           tenantId,
-          siteId: DEMO_SITE_ID,
+          stationId: DEMO_STATION_ID,
           keyId: issued.record.id,
         });
       }),

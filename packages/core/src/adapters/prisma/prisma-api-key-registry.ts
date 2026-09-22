@@ -109,11 +109,23 @@ export function createPrismaApiKeyRegistry(options?: { clock?: () => Date }): Ap
         where: { tenantId },
         orderBy: { createdAt: 'desc' },
       });
-      return rows.map((row: { id: string; tenantId: string; name: string; keyHash: string; scopes: string[]; status: string; createdAt: Date; expiresAt: Date | null; lastUsedAt: Date | null }) => {
-        const domain = toDomain(row);
-        const { keyHash: _keyHash, ...rest } = domain;
-        return rest;
-      });
+      return rows.map(
+        (row: {
+          id: string;
+          tenantId: string;
+          name: string;
+          keyHash: string;
+          scopes: string[];
+          status: string;
+          createdAt: Date;
+          expiresAt: Date | null;
+          lastUsedAt: Date | null;
+        }) => {
+          const domain = toDomain(row);
+          const { keyHash: _keyHash, ...rest } = domain;
+          return rest;
+        },
+      );
     },
 
     async countUsable(): Promise<number> {
