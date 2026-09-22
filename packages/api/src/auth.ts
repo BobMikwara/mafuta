@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   CredentialsNotProvisionedError,
+  enforceRateLimit,
   ForbiddenError,
   runWithTenantContext,
   UnauthorizedError,
@@ -8,6 +9,7 @@ import {
   type CredentialStatusReader,
   type CredentialStoreStatus,
   type Logger,
+  type RateLimiter,
   type TenantContext,
 } from '@fueltrack/core';
 
@@ -71,6 +73,13 @@ export interface AuthDependencies {
    * library stays usable in isolation, for example in unit tests of a route.
    */
   readonly credentialStatus?: CredentialStatusReader;
+  /**
+   * Throttles *rejected* credentials per client address. A key that is simply
+   * wrong is cheap to answer but expensive to guess, and a device fleet with a
+   * stale key can otherwise turn a misconfiguration into a flood of database
+   * lookups. Successful requests are never limited here.
+   */
+  readonly authLimiter?: RateLimiter;
 }
 
 function requestContext(request: FastifyRequest): Record<string, unknown> {
@@ -110,6 +119,11 @@ async function rejectPresentedCredential(
   reason: AuthFailureReason,
 ): Promise<never> {
   const context = requestContext(request);
+  if (dependencies.authLimiter !== undefined) {
+    // Enforced before the store is inspected, so a guessing client cannot keep
+    // forcing credential lookups.
+    enforceRateLimit(dependencies.authLimiter, `auth:${request.ip}`);
+  }
   const status = await readCredentialStatus(dependencies);
 
   if (status !== null && status.state === 'empty') {

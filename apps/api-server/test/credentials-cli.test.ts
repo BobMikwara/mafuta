@@ -84,7 +84,7 @@ describe('credentials CLI behavior', () => {
         headers: { authorization: `Bearer ${provisioned.secret}` },
       });
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ tanks: [] });
+      expect(response.json()).toEqual({ tanks: [], summaries: [] });
     } finally {
       await app.close();
     }

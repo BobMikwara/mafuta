@@ -1,24 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import {
-  toDomainAlarm,
+  toDomainAlert,
+  toDomainDevice,
+  toDomainFuelEvent,
   toDomainReading,
-  toDomainSite,
+  toDomainStation,
   toDomainTank,
   toPrismaAlertInput,
   toPrismaAlertType,
+  toPrismaDeviceInput,
+  toPrismaFuelEventInput,
   toPrismaGeometry,
+  toPrismaRawMessageInput,
   toPrismaReadingInput,
   toPrismaStationInput,
   toPrismaTankInput,
+  toDomainRawMessage,
 } from '../src/adapters/prisma/mappers.js';
-import { ALARM_TYPES } from '../src/domain/alarm.js';
+import { ALERT_TYPES, type Alert } from '../src/domain/alert.js';
 import type { TankGeometry } from '../src/domain/geometry.js';
 import {
   DEFAULT_TEST_GEOMETRY,
   TENANT_A,
-  makeAlarm,
+  makeAlert,
+  makeDevice,
+  makeEvent,
+  makeRawMessage,
   makeReading,
-  makeSite,
+  makeStation,
   makeTank,
   readingId,
 } from './factories.js';
@@ -44,7 +53,7 @@ function storedTankRow(geometry: TankGeometry) {
   return {
     id: 'tank-1',
     tenantId: TENANT_A,
-    stationId: 'site-1',
+    stationId: 'station-1',
     name: 'Diesel Tank 1',
     product: 'diesel',
     capacityLitres: decimal(19_000),
@@ -111,12 +120,14 @@ describe('prisma row mappers', () => {
     expect(input).toMatchObject({
       id: 'tank-1',
       tenantId: TENANT_A,
-      stationId: 'site-1',
+      stationId: 'station-1',
       product: 'petrol_95',
       capacityLitres: 19_000,
       unexplainedDecreaseLitresPerHour: 1200,
       deliveryMinLitres: 900,
       status: 'active',
+      calibrationSource: null,
+      calibrationAt: null,
     });
     expect(input.geometry).toEqual(DEFAULT_TEST_GEOMETRY);
   });
@@ -132,6 +143,7 @@ describe('prisma row mappers', () => {
 
     expect(tank.geometry).toEqual(geometry);
     expect(tank.capacityLitres).toBe(19_000);
+    expect(tank.stationId).toBe('station-1');
     expect(tank.thresholds).toMatchObject({
       criticalLowPercent: 10,
       lowPercent: 20,
@@ -144,16 +156,22 @@ describe('prisma row mappers', () => {
     });
   });
 
-  it('maps every alarm type onto an alert type the schema declares', () => {
-    for (const type of ALARM_TYPES) {
+  it('maps every domain alert type onto an alert type the schema declares', () => {
+    for (const type of ALERT_TYPES) {
       expect(SCHEMA_ALERT_TYPES).toContain(toPrismaAlertType(type));
     }
   });
 
-  it('stores alarm metrics as JSON with the reading reference', () => {
+  it('throws on an alert type the schema does not know, instead of writing it', () => {
+    expect(() => toPrismaAlertType('high_level' as Alert['type'])).toThrow(
+      /Unsupported alert type/,
+    );
+  });
+
+  it('stores alert metrics as JSON with the reading reference', () => {
     const input = toPrismaAlertInput(
-      makeAlarm({
-        type: 'critical-low-level',
+      makeAlert({
+        type: 'critical_stock',
         severity: 'critical',
         metrics: { levelMm: 900, percentFull: 9 },
         readingId: readingId('rdg-9'),
@@ -167,33 +185,60 @@ describe('prisma row mappers', () => {
     expect(JSON.parse(JSON.stringify(input.metrics))).toEqual(input.metrics);
   });
 
-  it('omits the reading reference when the alarm carries none', () => {
-    const input = toPrismaAlertInput(makeAlarm({ metrics: { levelMm: 900 } }));
+  it('omits the reading reference when the alert carries none', () => {
+    const input = toPrismaAlertInput(makeAlert({ metrics: { levelMm: 900 } }));
 
     expect(input.metrics).toEqual({ levelMm: 900 });
   });
 
-  it('reads a stored alert back into the domain alarm', () => {
-    const alarm = makeAlarm({
-      type: 'water-ingress',
+  it('reads a stored alert back into the domain alert', () => {
+    const alert = makeAlert({
+      type: 'water_level',
       severity: 'critical',
       status: 'acknowledged',
       metrics: { levelMm: 900 },
       readingId: readingId('rdg-9'),
     });
-    const input = toPrismaAlertInput(alarm);
+    const input = toPrismaAlertInput(alert);
 
-    const restored = toDomainAlarm({ ...input, updatedAt: RECORDED_AT });
+    const restored = toDomainAlert({ ...input, updatedAt: RECORDED_AT });
 
-    expect(restored.type).toBe('water-ingress');
+    expect(restored.type).toBe('water_level');
     expect(restored.severity).toBe('critical');
     expect(restored.status).toBe('acknowledged');
     expect(restored.readingId).toBe('rdg-9');
     expect(restored.metrics).toEqual({ levelMm: 900 });
   });
 
+  it('maps a domain station onto the station columns and back', () => {
+    const input = toPrismaStationInput(makeStation({ name: 'Depot 1' }));
+
+    expect(input).toMatchObject({
+      id: 'station-1',
+      tenantId: TENANT_A,
+      name: 'Depot 1',
+      code: 'TST-01',
+      timezone: 'Africa/Nairobi',
+      status: 'active',
+    });
+
+    const station = toDomainStation({
+      id: input.id,
+      tenantId: input.tenantId,
+      name: input.name,
+      code: input.code,
+      timezone: input.timezone,
+      status: input.status,
+      createdAt: RECORDED_AT,
+      updatedAt: RECORDED_AT,
+    });
+
+    expect(station.status).toBe('active');
+    expect(station.createdAt).toBe(RECORDED_AT.toISOString());
+  });
+
   it('maps a domain reading onto the columns the schema declares', () => {
-    const input = toPrismaReadingInput(makeReading({ source: 'manual' }));
+    const input = toPrismaReadingInput(makeReading({ source: 'manual', provenance: 'manual' }));
 
     expect(input).toMatchObject({
       id: 'rdg-1',
@@ -201,7 +246,7 @@ describe('prisma row mappers', () => {
       tankId: 'tank-1',
       deviceId: null,
       levelMm: 2000,
-      waterLevelMm: 2,
+      waterLevelMm: 5,
       volumeLitres: 9807.68,
       temperatureC: 24,
       sourceProtocol: 'manual',
@@ -217,48 +262,142 @@ describe('prisma row mappers', () => {
       id: 'rdg-1',
       tenantId: TENANT_A,
       tankId: 'tank-1',
+      deviceId: null,
       recordedAt: RECORDED_AT,
       receivedAt: RECORDED_AT,
       levelMm: decimal(2000),
-      waterLevelMm: decimal(2),
+      waterLevelMm: decimal(5),
       volumeLitres: decimal(9807.68),
       temperatureC: null,
-      sourceProtocol: 'simulated',
+      provenance: 'measured',
       qualityStatus: 'ok',
-      deviceId: null,
+      freshnessStatus: 'fresh',
+      sourceProtocol: 'simulated',
       idempotencyKey: 'idem-1',
+      rawMessageId: 'raw-1',
     });
 
     expect(reading.levelMm).toBe(2000);
-    expect(reading.waterLevelMm).toBe(2);
+    expect(reading.waterLevelMm).toBe(5);
     expect(reading.grossVolumeLitres).toBe(9807.68);
+    expect(reading.netVolumeLitres).toBe(9807.68);
     expect(reading.temperatureC).toBeNull();
     expect(reading.source).toBe('simulated');
+    expect(reading.rawMessageId).toBe('raw-1');
   });
 
-  it('maps a domain site onto the station columns and back', () => {
-    const input = toPrismaStationInput(makeSite({ name: 'Depot 1' }));
-
-    expect(input).toMatchObject({
-      id: 'site-1',
+  it('explains a non-ok verdict through the retained payload reference', () => {
+    const reading = toDomainReading({
+      id: 'rdg-2',
       tenantId: TENANT_A,
-      name: 'Depot 1',
-      code: 'site-1',
-      timezone: 'Africa/Nairobi',
-      status: 'active',
+      tankId: 'tank-1',
+      deviceId: null,
+      recordedAt: RECORDED_AT,
+      receivedAt: RECORDED_AT,
+      levelMm: decimal(2000),
+      waterLevelMm: null,
+      volumeLitres: decimal(9807.68),
+      temperatureC: null,
+      provenance: 'measured',
+      qualityStatus: 'suspect',
+      freshnessStatus: 'fresh',
+      sourceProtocol: 'http',
+      idempotencyKey: 'idem-2',
     });
 
-    const site = toDomainSite({
-      id: input.id,
-      tenantId: input.tenantId,
-      name: input.name,
-      timezone: input.timezone,
-      status: input.status,
+    expect(reading.waterLevelMm).toBe(0);
+    expect(reading.quality).toBe('suspect');
+    expect(reading.qualityReason).toContain('raw payload');
+  });
+
+  it('maps a domain device onto the columns the schema declares', () => {
+    const input = toPrismaDeviceInput(makeDevice({ lastSeenAt: null }));
+
+    expect(input).toMatchObject({
+      id: 'dev-1',
+      tenantId: TENANT_A,
+      serialNumber: 'SN-0001',
+      protocol: 'http',
+      status: 'active',
+      connectionState: 'online',
+      lastSeenAt: null,
+    });
+  });
+
+  it('reads a stored device back into the domain shape', () => {
+    const device = toDomainDevice({
+      id: 'dev-1',
+      tenantId: TENANT_A,
+      manufacturer: 'Acme',
+      model: 'Probe 3000',
+      serialNumber: 'SN-0001',
+      protocol: 'modbus_tcp',
+      firmwareVersion: null,
+      status: 'active',
+      connectionState: 'offline',
+      lastSeenAt: RECORDED_AT,
+      credentialRef: null,
       createdAt: RECORDED_AT,
       updatedAt: RECORDED_AT,
     });
 
-    expect(site.status).toBe('active');
-    expect(site.createdAt).toBe(RECORDED_AT.toISOString());
+    expect(device.protocol).toBe('modbus_tcp');
+    expect(device.connectionState).toBe('offline');
+    expect(device.lastSeenAt).toBe(RECORDED_AT.toISOString());
+  });
+
+  it('stores an event with millilitres converted to the litre column', () => {
+    const input = toPrismaFuelEventInput(makeEvent({ volumeChangeMl: 10_000_000 }));
+
+    expect(input.volumeChangeLitres).toBe('10000.000');
+    expect(input.evidence).toMatchObject({
+      volumeChangeMl: 10_000_000,
+      rule: 'Rise sustained within the delivery window',
+    });
+    // Explainer lists must survive the JSON round trip that the column imposes.
+    expect(JSON.parse(JSON.stringify(input.evidence))).toEqual(input.evidence);
+  });
+
+  it('reads a stored event back into millilitres', () => {
+    const event = toDomainFuelEvent({
+      id: 'evt-1',
+      tenantId: TENANT_A,
+      tankId: 'tank-1',
+      type: 'candidate_unexplained_decrease',
+      status: 'candidate',
+      confidence: decimal(0.6),
+      volumeChangeLitres: decimal(-2500.5),
+      windowStart: RECORDED_AT,
+      windowEnd: RECORDED_AT,
+      evidence: makeEvent().evidence,
+      notes: null,
+      decidedByUserId: null,
+      decidedAt: null,
+      createdAt: RECORDED_AT,
+      updatedAt: RECORDED_AT,
+    });
+
+    expect(event.volumeChangeMl).toBe(-2_500_500);
+    expect(event.confidence).toBeCloseTo(0.6, 5);
+    expect(event.type).toBe('candidate_unexplained_decrease');
+  });
+
+  it('reads and writes a raw device message', () => {
+    const record = makeRawMessage({ payload: { levelMm: 2000, vendorFrame: 'AA' } });
+    const input = toPrismaRawMessageInput(record);
+
+    expect(input.messageHash).toBe('hash-1');
+    expect(input.receivedAt).toEqual(RECORDED_AT);
+
+    const restored = toDomainRawMessage({
+      id: input.id,
+      tenantId: input.tenantId,
+      deviceId: input.deviceId,
+      protocol: input.protocol,
+      payload: input.payload,
+      messageHash: input.messageHash,
+      receivedAt: input.receivedAt,
+    });
+    expect(restored.payload).toEqual({ levelMm: 2000, vendorFrame: 'AA' });
   });
 });

@@ -6,6 +6,7 @@ import {
   formatIssues,
   NotFoundError,
   TenantIsolationError,
+  TooManyRequestsError,
   UnauthorizedError,
   ValidationError,
   type Logger,
@@ -82,6 +83,16 @@ export function registerErrorHandler(app: FastifyInstance, logger: Logger): void
           ...(requestId === undefined ? {} : { requestId }),
         };
         return reply.code(503).send(body);
+      }
+
+      if (error instanceof TooManyRequestsError) {
+        void reply.header('Retry-After', String(error.retryAfterSeconds));
+        const body: ErrorBody = {
+          error: 'rate_limited',
+          message: error.message,
+          ...(requestId === undefined ? {} : { requestId }),
+        };
+        return reply.code(429).send(body);
       }
 
       if (error instanceof ForbiddenError) {

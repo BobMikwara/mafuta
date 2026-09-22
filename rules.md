@@ -1,6 +1,7 @@
 # Repository Rules
 
 ## Mandatory
+
 - No emojis in the codebase, comments, documentation, commit messages, or UI copy.
 - Refrain from purple hues in the frontend.
 - Always test code before deployment.
@@ -20,6 +21,7 @@
 - Update documentation when behavior or contracts change.
 
 ## Code review checklist
+
 - Is the change modular?
 - Are inputs validated?
 - Are permissions enforced?

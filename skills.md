@@ -1,6 +1,7 @@
 # AI Engineering Skills for FuelTrack EA
 
 ## General workflow
+
 - Read the task, PRD, TRD, rules, and memory before coding.
 - Inspect existing files and follow established patterns.
 - Ask for clarification only when an unknown blocks safe implementation.
@@ -8,6 +9,7 @@
 - Prefer incremental commits and small pull requests.
 
 ## Backend skill
+
 - Use TypeScript strict mode.
 - Keep controllers thin.
 - Put business logic in services/use cases.
@@ -18,6 +20,7 @@
 - Make ingestion idempotent.
 
 ## Frontend skill
+
 - Use reusable components.
 - Keep data fetching separate from presentation.
 - Show loading, empty, error, stale, and permission states.
@@ -27,6 +30,7 @@
 - Avoid exposing secrets or internal IDs unnecessarily.
 
 ## Database skill
+
 - Use migrations.
 - Add indexes based on query patterns.
 - Use numeric/decimal for litres and monetary values.
@@ -35,6 +39,7 @@
 - Test tenant isolation with adversarial cases.
 
 ## Testing skill
+
 - Write tests before or alongside implementation.
 - Test happy paths and failure paths.
 - Test duplicate messages and delayed messages.
@@ -45,6 +50,7 @@
 - Run all relevant checks before claiming completion.
 
 ## Documentation skill
+
 - Document assumptions.
 - Document formulas.
 - Distinguish measured, recorded, estimated, and inferred values.
@@ -53,6 +59,7 @@
 - Do not include secrets, personal data, or unsupported claims.
 
 ## Security skill
+
 - Treat all device payloads as untrusted.
 - Never log tokens, passwords, full raw secrets, or sensitive personal data.
 - Use secure defaults.

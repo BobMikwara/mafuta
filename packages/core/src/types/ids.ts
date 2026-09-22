@@ -9,11 +9,15 @@ import { InvalidIdentifierError } from '../errors.js';
 export type Brand<TValue, TBrand extends string> = TValue & { readonly __brand: TBrand };
 
 export type TenantId = Brand<string, 'TenantId'>;
-export type SiteId = Brand<string, 'SiteId'>;
+export type StationId = Brand<string, 'StationId'>;
 export type TankId = Brand<string, 'TankId'>;
 export type DeviceId = Brand<string, 'DeviceId'>;
 export type ReadingId = Brand<string, 'ReadingId'>;
-export type AlarmId = Brand<string, 'AlarmId'>;
+export type AlertId = Brand<string, 'AlertId'>;
+export type FuelEventId = Brand<string, 'FuelEventId'>;
+export type DeliveryId = Brand<string, 'DeliveryId'>;
+export type AssignmentId = Brand<string, 'AssignmentId'>;
+export type RawMessageId = Brand<string, 'RawMessageId'>;
 export type ApiKeyId = Brand<string, 'ApiKeyId'>;
 export type PrincipalId = Brand<string, 'PrincipalId'>;
 
@@ -30,9 +34,9 @@ export function toTenantId(value: string): TenantId {
   return value as TenantId;
 }
 
-export function toSiteId(value: string): SiteId {
-  assertIdentifier(value, 'siteId');
-  return value as SiteId;
+export function toStationId(value: string): StationId {
+  assertIdentifier(value, 'stationId');
+  return value as StationId;
 }
 
 export function toTankId(value: string): TankId {
@@ -50,9 +54,14 @@ export function toReadingId(value: string): ReadingId {
   return value as ReadingId;
 }
 
-export function toAlarmId(value: string): AlarmId {
-  assertIdentifier(value, 'alarmId');
-  return value as AlarmId;
+export function toAlertId(value: string): AlertId {
+  assertIdentifier(value, 'alertId');
+  return value as AlertId;
+}
+
+export function toFuelEventId(value: string): FuelEventId {
+  assertIdentifier(value, 'eventId');
+  return value as FuelEventId;
 }
 
 export function toApiKeyId(value: string): ApiKeyId {

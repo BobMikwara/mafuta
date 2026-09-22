@@ -239,7 +239,7 @@ describe('accepted credentials', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ tanks: [] });
+      expect(response.json()).toEqual({ tanks: [], summaries: [] });
       expect(await rejections(fixture.records)).toHaveLength(0);
       expect(JSON.stringify(fixture.records)).not.toContain(issued.secret);
     } finally {

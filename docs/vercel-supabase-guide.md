@@ -43,11 +43,13 @@ npm run db:deploy
 ```
 
 Migrations:
+
 - `0001_init` baseline (13 tables)
 - `0002_idempotency_key` tenant-scoped idempotency
 - `0003_add_api_keys` new table for hashed API keys
 
 Check drift:
+
 ```bash
 export SHADOW_DATABASE_URL=postgresql://fueltrack:fueltrack@localhost:5433/fueltrack_shadow
 npm run db:drift
@@ -99,6 +101,7 @@ Located in `packages/core/src/adapters/prisma/`:
 - `prisma-api-key-registry.ts` implements `ApiKeyRegistry` with hashed lookup
 
 Enable via env:
+
 ```
 USE_PRISMA=true
 # or
@@ -106,21 +109,25 @@ DATABASE_URL contains "supabase" -> auto-enabled
 ```
 
 In `packages/api/src/dependency-factory.ts`:
+
 ```ts
-const usePrisma = shouldUsePrisma(options.usePrisma) // checks USE_PRISMA or supabase URL
-repositories = usePrisma ? createPrismaRepositories() : createMemoryRepositories()
-apiKeys = usePrisma ? createPrismaApiKeyRegistry() : createMemoryApiKeyRegistry()
+const usePrisma = shouldUsePrisma(options.usePrisma); // checks USE_PRISMA or supabase URL
+repositories = usePrisma ? createPrismaRepositories() : createMemoryRepositories();
+apiKeys = usePrisma ? createPrismaApiKeyRegistry() : createMemoryApiKeyRegistry();
 ```
 
 ## Step 4: Backend on Vercel
 
 `vercel.json`:
+
 ```json
 {
   "buildCommand": "npm run db:generate && npm run build",
   "outputDirectory": "apps/web/dist",
   "framework": "vite",
-  "functions": { "api/index.ts": { "includeFiles": "{apps/api-server/public/**,prisma/migrations/**}" } },
+  "functions": {
+    "api/index.ts": { "includeFiles": "{apps/api-server/public/**,prisma/migrations/**}" }
+  },
   "rewrites": [
     { "source": "/healthz", "destination": "/api" },
     { "source": "/v1/(.*)", "destination": "/api" }
@@ -129,6 +136,7 @@ apiKeys = usePrisma ? createPrismaApiKeyRegistry() : createMemoryApiKeyRegistry(
 ```
 
 `api/index.ts` is a Vercel serverless function:
+
 - Reads config from env (same as api-server)
 - Creates platform deps (Prisma if env set)
 - Applies committed migrations on cold start if `FUELTRACK_AUTO_MIGRATE=true` (see Step 2b)
@@ -155,11 +163,13 @@ apps/web/
 ```
 
 Env:
+
 ```
 VITE_API_URL=https://your-api.vercel.app (empty = relative, works on Vercel)
 ```
 
 Build:
+
 ```bash
 npm run build -w @fueltrack/web # -> apps/web/dist
 npm run dev -w @fueltrack/web    # -> http://localhost:5173 with proxy to :3000
@@ -244,6 +254,7 @@ node apps/simulator-runner/dist/index.js --api-url http://localhost:3000 --api-k
 ## One-Click Deploy
 
 With this branch:
+
 1. Push to GitHub
 2. Vercel auto-deploys frontend + backend
 3. Supabase holds data

@@ -1,9 +1,11 @@
 # FuelTrack EA - AI Execution Plan
 
 ## Mission
+
 Build a commercially deployable, multi-tenant fuel tank monitoring SaaS platform for Tanzania first and East Africa later. Initial scope is tank monitoring only, with an extensible architecture for future fuel dispenser and POS integration.
 
 ## Product principles
+
 - Hardware-vendor agnostic.
 - Security and tenant isolation by default.
 - Measurement limitations must be explicit.
@@ -20,6 +22,7 @@ Build a commercially deployable, multi-tenant fuel tank monitoring SaaS platform
 - Prefer small modules over mega-files.
 
 ## Delivery sequence
+
 1. Establish repository and development standards.
 2. Build architecture and domain model.
 3. Implement authentication, authorization, tenants, stations, tanks, devices, and assignments.
@@ -34,7 +37,9 @@ Build a commercially deployable, multi-tenant fuel tank monitoring SaaS platform
 12. Add dispenser/POS integration behind a separate bounded module.
 
 ## AI operating procedure
+
 For every task:
+
 1. Read all applicable rules, PRD, TRD, skills, and memory files.
 2. Inspect the existing repository before changing anything.
 3. State assumptions and identify unknowns.
@@ -46,6 +51,7 @@ For every task:
 9. Never silently invent device protocols or regulatory claims.
 
 ## Non-negotiable technical constraints
+
 - TypeScript with strict mode.
 - PostgreSQL as primary relational database.
 - Prisma migrations.
@@ -60,6 +66,7 @@ For every task:
 - Database migrations must be reversible or have a documented rollback plan.
 
 ## Suggested initial repository
+
 - apps/api
 - apps/web
 - packages/shared
@@ -72,7 +79,9 @@ For every task:
 - infra
 
 ## Definition of done
+
 A feature is complete only when:
+
 - Acceptance criteria are met.
 - Tests cover normal and failure paths.
 - Authorization and tenant isolation are tested.

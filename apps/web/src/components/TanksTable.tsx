@@ -50,16 +50,24 @@ export function TanksTable({ tanks, latestByTank }: Props) {
                   <td>{tank.name}</td>
                   <td>{tank.product}</td>
                   <td className="numeric">{reading ? `${reading.levelMm.toFixed(0)} mm` : '-'}</td>
-                  <td className="numeric">{reading ? `${reading.netVolumeLitres.toFixed(0)} L` : '-'}</td>
+                  <td className="numeric">
+                    {reading ? `${reading.netVolumeLitres.toFixed(0)} L` : '-'}
+                  </td>
                   <td>
                     <div className="progress-wrap">
                       <progress max={100} value={pct} />
                       <span>{formatPercent(tank, reading)}</span>
                     </div>
                   </td>
-                  <td className="numeric">{reading?.temperatureC != null ? `${reading.temperatureC.toFixed(1)} C` : '-'}</td>
-                  <td className="numeric">{reading ? `${reading.waterLevelMm.toFixed(1)} mm` : '-'}</td>
-                  <td className="numeric">{reading ? new Date(reading.recordedAt).toLocaleString() : '-'}</td>
+                  <td className="numeric">
+                    {reading?.temperatureC != null ? `${reading.temperatureC.toFixed(1)} C` : '-'}
+                  </td>
+                  <td className="numeric">
+                    {reading ? `${reading.waterLevelMm.toFixed(1)} mm` : '-'}
+                  </td>
+                  <td className="numeric">
+                    {reading ? new Date(reading.recordedAt).toLocaleString() : '-'}
+                  </td>
                 </tr>
               );
             })}

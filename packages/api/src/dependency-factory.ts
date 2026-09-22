@@ -1,4 +1,6 @@
 import {
+  AlertSweepService,
+  AuditService,
   checkPrismaConnection,
   describePrismaSchemaStatus,
   createLogger,
@@ -6,22 +8,56 @@ import {
   createMemoryRepositories,
   createPrismaApiKeyRegistry,
   createPrismaRepositories,
+  createRateLimiter,
   createStdioSink,
+  DEFAULT_RATE_LIMITS,
+  DashboardService,
+  DeviceService,
+  EventService,
   FleetService,
   generateApiKey,
   hashApiKey,
   IngestService,
+  rateLimitFromEnv,
+  ReportService,
   systemClock,
   type ApiKeyRecord,
   type ApiKeyRegistry,
+  type AuditService as AuditServiceType,
   type Clock,
+  type DashboardService as DashboardServiceType,
+  type DeviceService as DeviceServiceType,
+  type EventService as EventServiceType,
   type FleetService as FleetServiceType,
   type IngestService as IngestServiceType,
   type Logger,
   type LogLevel,
+  type RateLimiter,
+  type ReportService as ReportServiceType,
   type Repositories,
 } from '@fueltrack/core';
 import type { ServerDependencies } from './server.js';
+
+/**
+ * Rate limits. Each one is a separate limiter because the identities and the
+ * budgets differ: ingestion is per credential, authentication failures are per
+ * client address, and the report limit protects an expensive query.
+ */
+export interface PlatformRateLimits {
+  readonly ingestion: RateLimiter;
+  readonly authentication: RateLimiter;
+}
+
+export function createPlatformRateLimits(env: NodeJS.ProcessEnv = process.env): PlatformRateLimits {
+  return {
+    ingestion: createRateLimiter(
+      rateLimitFromEnv(env['FUELTRACK_INGEST_RATE_LIMIT'], DEFAULT_RATE_LIMITS.ingestion),
+    ),
+    authentication: createRateLimiter(
+      rateLimitFromEnv(env['FUELTRACK_AUTH_RATE_LIMIT'], DEFAULT_RATE_LIMITS.perClientAddress),
+    ),
+  };
+}
 
 export interface PlatformDependencies extends ServerDependencies {
   readonly clock: Clock;
@@ -29,11 +65,15 @@ export interface PlatformDependencies extends ServerDependencies {
   readonly repositories: Repositories;
   readonly fleetService: FleetServiceType;
   readonly ingestService: IngestServiceType;
-  /**
-   * Issues a credential and returns its secret exactly once. Intended for
-   * bootstrap and tests; production provisioning must go through a control
-   * plane that stores the secret in the operator's secret manager.
-   */
+  readonly deviceService: DeviceServiceType;
+  readonly eventService: EventServiceType;
+  readonly dashboardService: DashboardServiceType;
+  readonly reportService: ReportServiceType;
+  readonly auditService: AuditServiceType;
+  readonly alertSweepService: AlertSweepService;
+  /** Ingestion throttle derived from the environment. */
+  readonly ingestionLimiter: RateLimiter;
+  readonly authLimiter: RateLimiter;
   /**
    * Issues a credential and returns its secret exactly once. When `secret` is
    * supplied it is used instead of a generated one, which is how an operator
@@ -117,6 +157,34 @@ export function createPlatformDependencies(
     logger.info('persistence.memory.enabled', { reason: 'default for dev/test' });
   }
 
+  const limits = createPlatformRateLimits();
+
+  const fleetService = new FleetService({ repositories, clock, logger });
+  const deviceService = new DeviceService({ repositories, clock, logger });
+  const eventService = new EventService({ repositories, clock, logger });
+  const ingestService = new IngestService({ repositories, clock, logger, eventService });
+  const dashboardService = new DashboardService({
+    repositories,
+    clock,
+    logger,
+    fleetService,
+  });
+  const reportService = new ReportService({
+    repositories,
+    clock,
+    logger,
+    fleetService,
+    deviceService,
+    eventService,
+  });
+  const auditService = new AuditService({ auditLogs: repositories.auditLogs, clock, logger });
+  const alertSweepService = new AlertSweepService({
+    repositories,
+    clock,
+    logger,
+    ingestService,
+  });
+
   return {
     clock,
     logger,
@@ -126,8 +194,16 @@ export function createPlatformDependencies(
     ...(usePrisma
       ? { ready: checkPrismaConnection, schemaStatus: describePrismaSchemaStatus }
       : {}),
-    fleetService: new FleetService({ repositories, clock, logger }),
-    ingestService: new IngestService({ repositories, clock, logger }),
+    fleetService,
+    ingestService,
+    deviceService,
+    eventService,
+    dashboardService,
+    reportService,
+    auditService,
+    alertSweepService,
+    ingestionLimiter: limits.ingestion,
+    authLimiter: limits.authentication,
     issueApiKey: async (input) => {
       const generated = generateApiKey({
         tenantId: input.tenantId,

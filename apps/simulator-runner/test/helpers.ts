@@ -1,6 +1,6 @@
 import {
   DEFAULT_TANK_THRESHOLDS,
-  toSiteId,
+  toStationId,
   toTankId,
   toTenantId,
   type Tank,
@@ -14,13 +14,15 @@ export function makeTankLike(id = 'tank-1'): Tank {
   return {
     id: toTankId(id),
     tenantId: toTenantId('tenant-a'),
-    siteId: toSiteId('site-1'),
+    stationId: toStationId('station-1'),
     name: `Tank ${id}`,
     product: 'diesel',
     geometry: { kind: 'vertical-cylinder', diameterMm: 2500, heightMm: 4000 },
     capacityLitres: 19_000,
     thresholds: DEFAULT_TANK_THRESHOLDS,
     status: 'active',
+    calibrationSource: null,
+    calibrationAt: null,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };
