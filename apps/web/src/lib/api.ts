@@ -104,10 +104,44 @@ export function normalizeApiKey(raw: string): string {
   return key;
 }
 
+export interface ApiIssue {
+  readonly path: string;
+  readonly message: string;
+}
+
 interface ApiErrorBody {
   error?: string;
   message?: string;
   requestId?: string;
+  issues?: ApiIssue[];
+  requiredScopes?: string[];
+}
+
+/**
+ * A failed API call. The message is safe to show: it never includes the key.
+ * `issues` are field-level validation failures. `requiredScopes` names the
+ * permission a 403 was missing, so the form can explain the refusal.
+ */
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly code: string | undefined;
+  readonly issues: ReadonlyArray<ApiIssue>;
+  readonly requiredScopes: ReadonlyArray<string>;
+
+  constructor(
+    message: string,
+    status: number,
+    code: string | undefined,
+    issues: ReadonlyArray<ApiIssue>,
+    requiredScopes: ReadonlyArray<string>,
+  ) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.code = code;
+    this.issues = issues;
+    this.requiredScopes = requiredScopes;
+  }
 }
 
 /**
@@ -144,6 +178,20 @@ function requestLine(status: number, diagnostics: RequestDiagnostics | undefined
  * message, the request method and path, the status code, and the API the
  * console reached.
  */
+function issueText(body: ApiErrorBody): string {
+  if (body.issues === undefined || body.issues.length === 0) {
+    return '';
+  }
+  return ` ${body.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ')}.`;
+}
+
+function scopeText(body: ApiErrorBody): string {
+  if (body.requiredScopes === undefined || body.requiredScopes.length === 0) {
+    return '';
+  }
+  return ` Required scope: ${body.requiredScopes.join(', ')}.`;
+}
+
 export function describeApiFailure(
   status: number,
   body: ApiErrorBody,
@@ -164,40 +212,74 @@ export function describeApiFailure(
     const detail = body.message ? ` ${body.message}` : '';
     return `API key rejected. Check the key and try again.${detail} ${line} API: ${apiTarget()}`;
   }
+  if (status === 403) {
+    const explanation = body.message ?? 'This credential does not grant the required scope';
+    return `${explanation}.${scopeText(body)} ${line} API: ${apiTarget()}`;
+  }
   const explanation = body.message ?? 'The API rejected the request without a message';
-  return `${explanation} ${line} API: ${apiTarget()}`;
+  return `${explanation}${issueText(body)} ${line} API: ${apiTarget()}`;
 }
 
-async function request<T>(method: string, path: string, apiKey: string): Promise<T> {
+export interface AuthorizedRequest {
+  readonly method: string;
+  readonly path: string;
+  readonly body?: unknown;
+  readonly accept?: string;
+}
+
+/**
+ * Authenticated request used by the console. Failures throw `ApiRequestError`
+ * so a form can show the status, the field issues and the missing scopes
+ * without parsing the message. The key is sent only as a bearer header.
+ */
+export async function authorizedRequest<T>(apiKey: string, input: AuthorizedRequest): Promise<T> {
   const secret = normalizeApiKey(apiKey);
-  const diagnostics: RequestDiagnostics = { method, path: path.split('?')[0] ?? path };
+  const diagnostics: RequestDiagnostics = {
+    method: input.method,
+    path: input.path.split('?')[0] ?? input.path,
+  };
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${secret}`,
+    Accept: input.accept ?? 'application/json',
+    'Cache-Control': 'no-store',
+  };
+  if (input.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   let res: Response;
   try {
-    res = await fetch(apiUrl(path), {
-      method,
-      headers: {
-        Authorization: `Bearer ${secret}`,
-        Accept: 'application/json',
-        'Cache-Control': 'no-store',
-      },
+    res = await fetch(apiUrl(input.path), {
+      method: input.method,
+      headers,
+      ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    // Fetch throws TypeError on network failure or CORS block. Surface a
-    // helpful hint instead of a raw "Failed to fetch".
-    if (/Failed to fetch|NetworkError|Load failed/i.test(message)) {
-      throw new Error(
-        `Unable to reach the API [${diagnostics.method} ${diagnostics.path} no response]. Check VITE_API_URL and that the API allows CORS for this origin. API: ${apiTarget()}`,
-      );
-    }
-    throw new Error(`${message} [${diagnostics.method} ${diagnostics.path} no response]`);
+    const text = /Failed to fetch|NetworkError|Load failed/i.test(message)
+      ? `Unable to reach the API [${diagnostics.method} ${diagnostics.path} no response]. Check VITE_API_URL and that the API allows CORS for this origin. API: ${apiTarget()}`
+      : `${message} [${diagnostics.method} ${diagnostics.path} no response]`;
+    throw new ApiRequestError(text, 0, undefined, [], []);
   }
 
   if (!res.ok) {
     const body = await readErrorBody(res);
-    throw new Error(describeApiFailure(res.status, body, diagnostics));
+    throw new ApiRequestError(
+      describeApiFailure(res.status, body, diagnostics),
+      res.status,
+      body.error,
+      body.issues ?? [],
+      body.requiredScopes ?? [],
+    );
+  }
+  if (input.accept === 'text/csv' || input.accept === 'text/plain') {
+    return (await res.text()) as T;
   }
   return res.json() as Promise<T>;
+}
+
+async function request<T>(method: string, path: string, apiKey: string): Promise<T> {
+  return authorizedRequest<T>(apiKey, { method, path });
 }
 
 export async function fetchTanks(apiKey: string): Promise<{ tanks: Tank[] }> {

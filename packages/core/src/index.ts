@@ -29,6 +29,7 @@ export * from './domain/normalize.js';
 export * from './domain/idempotency.js';
 
 export * from './tenancy/tenant-context.js';
+export * from './tenancy/scopes.js';
 export * from './tenancy/api-key.js';
 export * from './tenancy/credential-health.js';
 export * from './tenancy/guard.js';

@@ -19,6 +19,7 @@ export {
   type CredentialReadinessResult,
 } from './credential-readiness.js';
 export { registerErrorHandler } from './errors.js';
+export { registerSessionRoutes } from './routes/session.js';
 export { registerStationRoutes } from './routes/stations.js';
 export { registerTankRoutes } from './routes/tanks.js';
 export { registerAlertRoutes } from './routes/alerts.js';

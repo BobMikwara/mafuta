@@ -3,6 +3,9 @@ import {
   CredentialsNotProvisionedError,
   enforceRateLimit,
   ForbiddenError,
+  hasLegacyScopes,
+  missingScopes,
+  normalizeScopes,
   runWithTenantContext,
   UnauthorizedError,
   type ApiKeyRegistry,
@@ -201,11 +204,17 @@ async function resolveTenantContext(
     }
   }
 
+  const scopes = normalizeScopes(record.scopes);
+  if (hasLegacyScopes(record.scopes)) {
+    // The key id is not a secret. The presented key never is logged.
+    dependencies.logger.info('auth.legacy_scopes', { apiKeyId: record.id });
+  }
+
   return {
     tenantId: record.tenantId,
     principalId: `key:${record.id}` as TenantContext['principalId'],
     apiKeyId: record.id,
-    scopes: record.scopes,
+    scopes,
     ...(request.id === undefined ? {} : { requestId: request.id }),
   };
 }
@@ -242,10 +251,9 @@ export function requireScopes(...required: ReadonlyArray<string>) {
     if (context === undefined) {
       throw new UnauthorizedError();
     }
-    const granted = new Set(context.scopes);
-    const missing = required.filter((scope) => !granted.has(scope));
+    const missing = missingScopes(context.scopes, required);
     if (missing.length > 0) {
-      throw new ForbiddenError('The credential does not grant the required scope');
+      throw new ForbiddenError(`This credential does not grant ${missing.join(', ')}`, missing);
     }
   };
 }

@@ -1,160 +1,77 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { ConnectionPanel } from './components/ConnectionPanel';
-import { TanksTable } from './components/TanksTable';
-import { AlertsList } from './components/AlertsList';
+import { AppShell, Gate } from './components/chrome';
 import {
-  fetchTanks,
-  fetchReadings,
-  fetchAlerts,
-  fetchHealth,
-  normalizeApiKey,
-  type Tank,
-  type Reading,
-  type Alert,
-  type ServiceHealth,
-} from './lib/api';
+  AppLink,
+  RouterProvider,
+  SessionProvider,
+  ToastProvider,
+  useRouter,
+  useSession,
+} from './components/providers';
+import { DashboardPage } from './pages/DashboardPage';
+import { DevicePage, DevicesPage } from './pages/DevicesPage';
+import { ReadingsPage } from './pages/ReadingsPage';
+import {
+  AlertsPage,
+  DeliveriesPage,
+  ReconciliationPage,
+  ReportsPage,
+  SettingsPage,
+} from './pages/ReviewPages';
+import { StationPage } from './pages/StationPage';
+import { StationsPage } from './pages/StationsPage';
+import { TankPage } from './pages/TankPage';
+import { TanksPage } from './pages/TanksPage';
+import { EmptyState } from './components/ui';
 
-const STORAGE_KEY = 'fueltrack.apiKey';
-const REFRESH_MS = 5000;
-
-export default function App() {
-  const [apiKey, setApiKey] = useState(() => {
-    const stored = sessionStorage.getItem(STORAGE_KEY) || '';
-    // Migrate old values that may have been saved with "Bearer " or quotes.
-    const normalized = stored ? normalizeApiKey(stored) : '';
-    if (normalized !== stored && normalized) {
-      sessionStorage.setItem(STORAGE_KEY, normalized);
-    }
-    return normalized;
-  });
-  const [tanks, setTanks] = useState<Tank[]>([]);
-  const [latestByTank, setLatestByTank] = useState<Record<string, Reading>>({});
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [status, setStatus] = useState('Enter API key to connect');
-  const [statusKind, setStatusKind] = useState<'idle' | 'ready' | 'error'>('idle');
-  const [health, setHealth] = useState<ServiceHealth | null>(null);
-  const timerRef = useRef<number | null>(null);
-
-  // The deployment health explains a rejection that has nothing to do with the
-  // pasted key, so it is fetched independently of the credentials.
-  useEffect(() => {
-    let active = true;
-    fetchHealth()
-      .then((result) => {
-        if (active) setHealth(result);
-      })
-      .catch(() => {
-        if (active) setHealth(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const refresh = useCallback(async (key: string) => {
-    try {
-      const [tanksRes, alertsRes] = await Promise.all([fetchTanks(key), fetchAlerts(key)]);
-      const tankList = tanksRes.tanks || [];
-      setTanks(tankList);
-
-      const latestEntries = await Promise.all(
-        tankList.map(async (tank) => {
-          try {
-            const r = await fetchReadings(key, tank.id, 1);
-            return { tankId: tank.id, reading: r.readings[0] || null };
-          } catch {
-            return { tankId: tank.id, reading: null };
-          }
-        }),
-      );
-
-      const map: Record<string, Reading> = {};
-      for (const entry of latestEntries) {
-        if (entry.reading) map[entry.tankId] = entry.reading;
-      }
-      setLatestByTank(map);
-      setAlerts(alertsRes.alerts || []);
-      setStatus(`Connected. Last update ${new Date().toLocaleTimeString()}`);
-      setStatusKind('ready');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unable to load data';
-      setStatus(msg);
-      setStatusKind('error');
-    }
-  }, []);
-
-  const startPolling = useCallback(
-    (key: string) => {
-      if (timerRef.current) window.clearInterval(timerRef.current);
-      refresh(key);
-      timerRef.current = window.setInterval(() => refresh(key), REFRESH_MS);
-    },
-    [refresh],
-  );
-
-  const stopPolling = useCallback(() => {
-    if (timerRef.current) {
-      window.clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    if (apiKey) {
-      startPolling(apiKey);
-    }
-    return () => stopPolling();
-  }, [apiKey, startPolling, stopPolling]);
-
-  const handleConnect = (key: string) => {
-    const normalized = normalizeApiKey(key);
-    sessionStorage.setItem(STORAGE_KEY, normalized);
-    setApiKey(normalized);
-  };
-
-  const handleDisconnect = () => {
-    stopPolling();
-    sessionStorage.removeItem(STORAGE_KEY);
-    setApiKey('');
-    setTanks([]);
-    setLatestByTank({});
-    setAlerts([]);
-    setStatus('Disconnected');
-    setStatusKind('idle');
-  };
+function Screen() {
+  const session = useSession();
+  const { route } = useRouter();
+  if (session.status !== 'ready' || session.apiKey.length === 0) {
+    return <Gate />;
+  }
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div>
-          <h1>FuelTrack EA</h1>
-          <p className="subtitle">Tank monitoring console – React + Supabase + Vercel</p>
-        </div>
-        <div className="topbar-right">
-          <span className={`dot ${statusKind}`} />
-          <span className="small">{tanks.length} tanks</span>
-        </div>
-      </header>
-
-      <main>
-        <ConnectionPanel
-          apiKey={apiKey}
-          onConnect={handleConnect}
-          onDisconnect={handleDisconnect}
-          status={status}
-          statusKind={statusKind}
-          health={health}
+    <AppShell>
+      {route.name === 'dashboard' ? <DashboardPage /> : null}
+      {route.name === 'stations' ? <StationsPage /> : null}
+      {route.name === 'station' && route.resourceId ? (
+        <StationPage stationId={route.resourceId} />
+      ) : null}
+      {route.name === 'tanks' ? <TanksPage /> : null}
+      {route.name === 'tank' && route.resourceId ? <TankPage tankId={route.resourceId} /> : null}
+      {route.name === 'devices' ? <DevicesPage /> : null}
+      {route.name === 'device' && route.resourceId ? (
+        <DevicePage deviceId={route.resourceId} />
+      ) : null}
+      {route.name === 'readings' ? <ReadingsPage /> : null}
+      {route.name === 'deliveries' ? <DeliveriesPage /> : null}
+      {route.name === 'reconciliation' ? <ReconciliationPage /> : null}
+      {route.name === 'alerts' ? <AlertsPage /> : null}
+      {route.name === 'reports' ? <ReportsPage /> : null}
+      {route.name === 'settings' ? <SettingsPage /> : null}
+      {route.name === 'not-found' ? (
+        <EmptyState
+          title="That page is not in this console"
+          body="The address does not match a screen that is implemented. Use the navigation to get back to the fleet."
+          action={
+            <AppLink className="btn primary" to="/">
+              Dashboard
+            </AppLink>
+          }
         />
+      ) : null}
+    </AppShell>
+  );
+}
 
-        <TanksTable tanks={tanks} latestByTank={latestByTank} />
-
-        <AlertsList alerts={alerts} />
-
-        <p className="footnote">
-          Values tagged as <code>simulated</code> are synthetic and never presented as device
-          measurements. Backend: Fastify on Vercel serverless, DB: Supabase Postgres via Prisma.
-        </p>
-      </main>
-    </div>
+export default function App() {
+  return (
+    <RouterProvider>
+      <ToastProvider>
+        <SessionProvider>
+          <Screen />
+        </SessionProvider>
+      </ToastProvider>
+    </RouterProvider>
   );
 }

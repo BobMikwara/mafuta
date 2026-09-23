@@ -36,6 +36,7 @@ import { registerEventRoutes } from './routes/events.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerReportRoutes } from './routes/reports.js';
 import { registerAuditRoutes } from './routes/audit.js';
+import { registerSessionRoutes } from './routes/session.js';
 
 const DEFAULT_BODY_LIMIT_BYTES = 65_536;
 /**
@@ -429,6 +430,7 @@ export async function buildServer(
           ? {}
           : { ipHashSecret: dependencies.auditHashSecret }),
       };
+      registerSessionRoutes(v1);
       registerStationRoutes(v1, { fleet, ...shared });
       registerTankRoutes(v1, {
         fleet,
