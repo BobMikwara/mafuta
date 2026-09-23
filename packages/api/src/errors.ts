@@ -17,6 +17,7 @@ interface ErrorBody {
   error: string;
   message?: string | undefined;
   issues?: ReadonlyArray<{ path: string; message: string }> | undefined;
+  requiredScopes?: ReadonlyArray<string> | undefined;
   requestId?: string | undefined;
 }
 
@@ -96,8 +97,14 @@ export function registerErrorHandler(app: FastifyInstance, logger: Logger): void
       }
 
       if (error instanceof ForbiddenError) {
+        void reply.header(
+          'WWW-Authenticate',
+          'Bearer realm="fueltrack", error="insufficient_scope"',
+        );
         const body: ErrorBody = {
           error: 'forbidden',
+          message: error.message,
+          ...(error.requiredScopes.length === 0 ? {} : { requiredScopes: error.requiredScopes }),
           ...(requestId === undefined ? {} : { requestId }),
         };
         return reply.code(403).send(body);

@@ -22,6 +22,10 @@
     {
       "source": "/public/(.*)",
       "destination": "/api"
+    },
+    {
+      "source": "/((?!api(?:/|$)|v1(?:/|$)|healthz(?:/|$)|public(?:/|$)|assets(?:/|$)).*)",
+      "destination": "/index.html"
     }
   ],
   "headers": [

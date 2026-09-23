@@ -58,8 +58,14 @@ export class CredentialsNotProvisionedError extends FuelTrackError {
 }
 
 export class ForbiddenError extends FuelTrackError {
-  constructor(message = 'Access denied for this tenant') {
+  readonly requiredScopes: ReadonlyArray<string>;
+
+  constructor(
+    message = 'Access denied for this tenant',
+    requiredScopes: ReadonlyArray<string> = [],
+  ) {
     super(message);
+    this.requiredScopes = requiredScopes;
   }
 }
 

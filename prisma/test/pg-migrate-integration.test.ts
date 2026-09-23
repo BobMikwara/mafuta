@@ -104,6 +104,7 @@ describe.skipIf(!canRun)('runtime migrations against a real PostgreSQL server', 
       '0001_init',
       '0002_idempotency_key',
       '0003_add_api_keys',
+      '0004_rename_legacy_scopes',
     ]);
 
     const pool = new pg.Pool({
@@ -117,7 +118,12 @@ describe.skipIf(!canRun)('runtime migrations against a real PostgreSQL server', 
 
       const first = await runMigrations({ sql, migrations: catalog, directory: MIGRATIONS_DIR });
       expect(first.status).toBe('applied');
-      expect(first.applied).toEqual(['0001_init', '0002_idempotency_key', '0003_add_api_keys']);
+      expect(first.applied).toEqual([
+        '0001_init',
+        '0002_idempotency_key',
+        '0003_add_api_keys',
+        '0004_rename_legacy_scopes',
+      ]);
 
       // The tables the API queries on every request now exist.
       const status = await probeSchemaStatus(sql);
@@ -136,7 +142,7 @@ describe.skipIf(!canRun)('runtime migrations against a real PostgreSQL server', 
         `SELECT migration_name, checksum, rolled_back_at, applied_steps_count
            FROM "${PRISMA_MIGRATIONS_TABLE}" ORDER BY migration_name`,
       );
-      expect(bookkeeping.rows).toHaveLength(3);
+      expect(bookkeeping.rows).toHaveLength(4);
       expect(
         bookkeeping.rows.every(
           (row: { rolled_back_at: Date | null }) => row.rolled_back_at === null,
@@ -203,6 +209,7 @@ describe.skipIf(!canRun)('runtime migrations against a real PostgreSQL server', 
         '0001_init',
         '0002_idempotency_key',
         '0003_add_api_keys',
+        '0004_rename_legacy_scopes',
       ]);
 
       const count = await poolA.query(

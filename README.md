@@ -8,22 +8,22 @@ tenant-isolated HTTP API, deterministic tank simulator, and a rule-based alarm e
 Foundation phase. Working, tested, and runnable locally. **Not production ready**:
 persistence is in-memory, there is no rate limiting, and no hardware adapter exists yet.
 
-| Area                                        | State                                                |
-| ------------------------------------------- | ---------------------------------------------------- |
-| Domain model and geometry maths             | Done, tested                                         |
-| Tank simulator (deterministic, 7 scenarios) | Done, tested                                         |
-| Alarm rules engine                          | Done, tested                                         |
-| Tenant isolation (repositories and HTTP)    | Done, tested with cross-tenant cases                 |
-| Validation of all external input            | Done, tested                                         |
-| API key authentication and scopes           | Done, tested                                         |
-| Idempotent ingestion                        | Done, tested in the service, HTTP and database       |
-| HTTP API (Fastify)                          | Done, tested                                         |
-| Simulator runner CLI                        | Done, tested                                         |
-| Dashboard                                   | Read-only, development use                           |
-| Prisma schema and migrations                | Done, both migrations verified against PostgreSQL 18 |
-| Durable persistence                         | Not started, ports are ready                         |
-| Hardware gauge adapter                      | Blocked, waiting on protocol documentation           |
-| Rate limiting                               | Not started                                          |
+| Area                                        | State                                                      |
+| ------------------------------------------- | ---------------------------------------------------------- |
+| Domain model and geometry maths             | Done, tested                                               |
+| Tank simulator (deterministic, 7 scenarios) | Done, tested                                               |
+| Alarm rules engine                          | Done, tested                                               |
+| Tenant isolation (repositories and HTTP)    | Done, tested with cross-tenant cases                       |
+| Validation of all external input            | Done, tested                                               |
+| API key authentication and scopes           | Done, tested                                               |
+| Idempotent ingestion                        | Done, tested in the service, HTTP and database             |
+| HTTP API (Fastify)                          | Done, tested                                               |
+| Simulator runner CLI                        | Done, tested                                               |
+| Dashboard                                   | React operator console: create and edit stations and tanks |
+| Prisma schema and migrations                | Done, both migrations verified against PostgreSQL 18       |
+| Durable persistence                         | Not started, ports are ready                               |
+| Hardware gauge adapter                      | Blocked, waiting on protocol documentation                 |
+| Rate limiting                               | Not started                                                |
 
 ## Layout
 

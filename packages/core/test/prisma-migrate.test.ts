@@ -97,6 +97,7 @@ describe('committed migrations against a fresh PostgreSQL database', () => {
       '0001_init',
       '0002_idempotency_key',
       '0003_add_api_keys',
+      '0004_rename_legacy_scopes',
     ]);
     // The checksum is what `prisma migrate deploy` compares against.
     expect(catalog[0]?.checksum).toMatch(/^[0-9a-f]{64}$/);
@@ -110,7 +111,12 @@ describe('committed migrations against a fresh PostgreSQL database', () => {
     });
 
     expect(summary.status).toBe('applied');
-    expect(summary.applied).toEqual(['0001_init', '0002_idempotency_key', '0003_add_api_keys']);
+    expect(summary.applied).toEqual([
+      '0001_init',
+      '0002_idempotency_key',
+      '0003_add_api_keys',
+      '0004_rename_legacy_scopes',
+    ]);
     expect(summary.drift).toEqual([]);
     expect(summary.outOfOrder).toEqual([]);
 
@@ -122,6 +128,7 @@ describe('committed migrations against a fresh PostgreSQL database', () => {
       '0001_init',
       '0002_idempotency_key',
       '0003_add_api_keys',
+      '0004_rename_legacy_scopes',
     ]);
     expect(rows.every((row) => row.rolled_back_at === null)).toBe(true);
     expect(rows.every((row) => row.finished_at !== null)).toBe(true);
@@ -143,11 +150,11 @@ describe('committed migrations against a fresh PostgreSQL database', () => {
 
     expect(second.status).toBe('up_to_date');
     expect(second.applied).toEqual([]);
-    expect(second.available).toBe(3);
+    expect(second.available).toBe(4);
     expect(messages).toContain('db.migrate_status');
 
     const rows = await readBookkeeping(db);
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
   });
 
   it('reports drift when an applied file changes, without re-running it', async () => {

@@ -19,7 +19,7 @@ interface ApiModule {
   apiTarget(): string;
   describeApiFailure(
     status: number,
-    body: { error?: string; message?: string },
+    body: { error?: string; message?: string; requiredScopes?: string[] },
     diagnostics?: { method: string; path: string },
   ): string;
   fetchTanks(apiKey: string): Promise<{ tanks: unknown[] }>;
@@ -82,6 +82,23 @@ describe('api target reporting', () => {
     expect(message).toContain('key:provision');
     expect(message).toContain(API_ORIGIN);
     expect(message).not.toContain('API key rejected');
+  });
+
+  it('names the missing scope on a 403 instead of a bare refusal', async () => {
+    const { describeApiFailure } = await loadApiModule();
+    const message = describeApiFailure(
+      403,
+      {
+        error: 'forbidden',
+        message: 'This credential does not grant stations:write',
+        requiredScopes: ['stations:write'],
+      },
+      { method: 'POST', path: '/v1/stations' },
+    );
+    expect(message).toContain('stations:write');
+    expect(message).toContain('POST /v1/stations');
+    expect(message).toContain('status 403');
+    expect(message).not.toContain('ftk_');
   });
 
   it('includes method, path and status in every failure message', async () => {

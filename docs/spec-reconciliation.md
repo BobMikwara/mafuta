@@ -23,7 +23,7 @@ done about it.
 | Provenance        | Distinguish measured, recorded, estimated, inferred                                                             | quality only (ok, suspect, invalid)                                 | Schema done. Code is next.                                                           |
 | Rate limits       | Required on ingestion and auth                                                                                  | Not implemented                                                     | Not started.                                                                         |
 | Clock skew        | Reject or mark for review                                                                                       | Not implemented                                                     | Not started.                                                                         |
-| Frontend          | React with TypeScript                                                                                           | Vanilla JavaScript console                                          | Not started.                                                                         |
+| Frontend          | React with TypeScript                                                                                           | Vanilla JavaScript console                                          | Operator console is React. It creates and edits stations and tanks through `/v1`.    |
 | Timezone default  | Tanzania first                                                                                                  | Demo used Africa/Nairobi                                            | Fixed in the schema default. Demo data is next.                                      |
 | Repository layout | apps/api, apps/web, packages/shared, packages/device-contracts, services/processing, prisma, docs, tests, infra | packages/core, packages/api, apps/api-server, apps/simulator-runner | Not yet restructured. Suggested, not mandatory.                                      |
 
@@ -57,8 +57,9 @@ two ever disagree, CI fails rather than silently drifting.
    audit logging on privileged actions.
 6. **Persistence**: implement the `Repositories` ports on Prisma, keep the in-memory
    implementation for unit tests, and add integration tests against PostgreSQL.
-7. **Frontend**: replace the vanilla console with React and TypeScript, showing freshness,
-   quality, and permission states.
+7. **Frontend**: ~~replace the vanilla console with React and TypeScript~~ done for the
+   operator console. It shows freshness, quality, source and the scopes returned by
+   `/v1/session`. Users, passwords and MFA remain in step 5.
 8. **Pilot readiness**: observability, backups, security review, deployment automation.
 
 ## Open questions for the product owner
@@ -113,3 +114,36 @@ and the `{ alerts }` envelope, `apps/web` types the response as `Alert` and tank
 the consoles issue (from the exported `CONSOLE_REQUESTS` constant) against a real server,
 so a rename on either side fails CI instead of the connection panel. The credentials CLI
 gained `revoke` so a key can be retired: rotation is provision, update callers, revoke.
+
+### Operator console create and edit (done in the app, not yet redeployed)
+
+Adding a station or a tank failed in the shipped console because that console never
+sent a create request. It polled tanks, readings and alerts and had no form, no
+`POST /v1/stations` and no `POST /v1/tanks`. The API already accepted those writes.
+Keys issued before the site rename can still store `sites:write`. Authentication
+maps that name onto `stations:write`, so a create is not refused while migration
+`0004_rename_legacy_scopes` is waiting to rewrite the stored rows. A 403 that is a
+real missing scope names `requiredScopes` instead of returning an empty forbidden
+error.
+
+The React console now:
+
+- signs in with `GET /v1/session` and keeps the key in the browser tab only;
+- creates and edits stations (`POST` and `PATCH /v1/stations`) and tanks
+  (`POST` and `PATCH /v1/tanks`) with the same field set the schemas already accept;
+- rejects a non-positive capacity and a capacity above the declared cylinder before
+  the request is sent, and shows the API's field issues if the server still rejects it;
+- refreshes the list and opens the created record only after a 201;
+- labels simulated and manual readings, and treats a missing reading as missing;
+- covers stations, tanks, devices, readings, deliveries, reconciliation, alerts,
+  reports and settings. A route that is not implemented is a not-found page, not a
+  fake screen.
+
+`packages/api/test/console-create.test.ts` posts the drawer bodies through
+`createHarness` and reads the station and tank back, including a cross-tenant 404.
+That proves the save path in process. It does not prove the currently deployed
+Vercel project: that host is behind the platform's access check, so this increment
+does not claim a production create succeeded. The SPA fallback in `vercel.json`
+sends client routes to `index.html` and leaves `/v1`, `/healthz`, `/public` and
+`/assets` on their existing destinations, so a refresh of `/stations` does not turn
+an API call into HTML. That rewrite takes effect on the next deploy.
