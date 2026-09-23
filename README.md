@@ -113,6 +113,7 @@ npm run build
 npm run key:provision -- --tenant demo-tenant --name console   # prints the key once
 cat key.txt | npm run key:verify -- --tenant demo-tenant       # is this key accepted here?
 npm run key:list -- --tenant demo-tenant                       # what is provisioned (no key material)
+npm run key:revoke -- --tenant demo-tenant --key-id <id>       # retire a key during rotation
 ```
 
 `GET /healthz` reports the credential store (`ready`, `empty`, `unavailable`) and answers

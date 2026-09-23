@@ -185,7 +185,7 @@ progress {
   color: var(--critical);
 }
 
-.alarms {
+.alert-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -193,7 +193,7 @@ progress {
   gap: 8px;
 }
 
-.alarms li {
+.alert-list li {
   border: 1px solid var(--panel-border);
   border-radius: 8px;
   padding: 10px 12px;
@@ -203,7 +203,7 @@ progress {
   flex-wrap: wrap;
 }
 
-.alarms .when {
+.alert-list .when {
   color: var(--muted);
   font-size: 12px;
   font-family: ui-monospace, monospace;

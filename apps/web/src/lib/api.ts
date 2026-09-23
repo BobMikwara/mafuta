@@ -1,6 +1,6 @@
 export interface Tank {
   id: string;
-  siteId: string;
+  stationId: string;
   name: string;
   product: string;
   capacityLitres: number;
@@ -21,9 +21,9 @@ export interface Reading {
   quality: string;
 }
 
-export interface Alarm {
+export interface Alert {
   id: string;
-  tankId: string;
+  tankId: string | null;
   type: string;
   severity: 'info' | 'warning' | 'critical';
   status: string;
@@ -43,6 +43,20 @@ export interface ServiceHealth {
    */
   credentials?: 'ready' | 'empty' | 'unavailable' | 'not_configured';
 }
+
+/**
+ * The console's HTTP contract with the v1 API, kept in one place. The contract
+ * test in `packages/api/test/console-contract.test.ts` replays exactly these
+ * requests against a real server, so a rename on either side fails a test
+ * instead of failing at the connection panel with a 404.
+ */
+export const CONSOLE_REQUESTS = {
+  health: '/healthz',
+  tanks: '/v1/tanks?limit=100',
+  alerts: '/v1/alerts?status=open&limit=100',
+  readings: (tankId: string, limit = 1): string =>
+    `/v1/tanks/${encodeURIComponent(tankId)}/readings?limit=${limit}`,
+} as const;
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -96,44 +110,71 @@ interface ApiErrorBody {
   requestId?: string;
 }
 
+/**
+ * Non-secret diagnostics for a failed request: method and URL path only. The
+ * query string is omitted (it carries filters, not identity) and the
+ * Authorization header is never part of any message.
+ */
+export interface RequestDiagnostics {
+  readonly method: string;
+  readonly path: string;
+}
+
 async function readErrorBody(res: Response): Promise<ApiErrorBody> {
+  const text = await res.text();
   try {
-    return (await res.clone().json()) as ApiErrorBody;
+    return JSON.parse(text) as ApiErrorBody;
   } catch {
-    return {};
+    // Non-JSON error bodies (proxy or platform pages) carry no structured
+    // message. A short single-line excerpt is kept for diagnostics; long or
+    // empty bodies are dropped rather than dumped into the UI.
+    const excerpt = text.replace(/\s+/g, ' ').trim().slice(0, 120);
+    return excerpt.length > 0 ? { message: excerpt } : {};
   }
+}
+
+function requestLine(status: number, diagnostics: RequestDiagnostics | undefined): string {
+  const target = diagnostics === undefined ? '' : `${diagnostics.method} ${diagnostics.path} `;
+  return `[${target}status ${status}]`;
 }
 
 /**
  * Error text for one kind of server rejection. The key itself is never echoed,
  * and neither is any part of it: only the server's non-secret error code, its
- * message and the API the console reached.
+ * message, the request method and path, the status code, and the API the
+ * console reached.
  */
-export function describeApiFailure(status: number, body: ApiErrorBody): string {
+export function describeApiFailure(
+  status: number,
+  body: ApiErrorBody,
+  diagnostics?: RequestDiagnostics,
+): string {
+  const line = requestLine(status, diagnostics);
   if (status === 503 && body.error === 'credentials_not_provisioned') {
     // The server is reachable and the key may well be correct: nothing is
     // provisioned on the server side, so blaming the pasted key would be wrong.
     return [
       'This deployment has no API key provisioned, so no key can be accepted yet.',
       'Provision one on the server (npm run key:provision) or start it with FUELTRACK_SEED_DEMO=true and FUELTRACK_DEV_API_KEY, then reconnect.',
+      line,
       `API: ${apiTarget()}`,
     ].join(' ');
   }
   if (status === 401) {
     const detail = body.message ? ` ${body.message}` : '';
-    return `API key rejected. Check the key and try again.${detail} API: ${apiTarget()}`;
+    return `API key rejected. Check the key and try again.${detail} ${line} API: ${apiTarget()}`;
   }
-  return body.message
-    ? `Request failed ${status}. API: ${apiTarget()} (${body.message})`
-    : `Request failed ${status}. API: ${apiTarget()}`;
+  const explanation = body.message ?? 'The API rejected the request without a message';
+  return `${explanation} ${line} API: ${apiTarget()}`;
 }
 
-async function request<T>(path: string, apiKey: string): Promise<T> {
+async function request<T>(method: string, path: string, apiKey: string): Promise<T> {
   const secret = normalizeApiKey(apiKey);
+  const diagnostics: RequestDiagnostics = { method, path: path.split('?')[0] ?? path };
   let res: Response;
   try {
     res = await fetch(apiUrl(path), {
-      method: 'GET',
+      method,
       headers: {
         Authorization: `Bearer ${secret}`,
         Accept: 'application/json',
@@ -146,28 +187,21 @@ async function request<T>(path: string, apiKey: string): Promise<T> {
     // helpful hint instead of a raw "Failed to fetch".
     if (/Failed to fetch|NetworkError|Load failed/i.test(message)) {
       throw new Error(
-        'Unable to reach the API. Check VITE_API_URL and that the API allows CORS for this origin.',
+        `Unable to reach the API [${diagnostics.method} ${diagnostics.path} no response]. Check VITE_API_URL and that the API allows CORS for this origin. API: ${apiTarget()}`,
       );
     }
-    throw new Error(message);
+    throw new Error(`${message} [${diagnostics.method} ${diagnostics.path} no response]`);
   }
 
   if (!res.ok) {
     const body = await readErrorBody(res);
-    if (
-      res.status === 401 ||
-      (res.status === 503 && body.error === 'credentials_not_provisioned')
-    ) {
-      throw new Error(describeApiFailure(res.status, body));
-    }
-    const text = await res.text();
-    throw new Error(`Request failed ${res.status}: ${text.slice(0, 200)}`);
+    throw new Error(describeApiFailure(res.status, body, diagnostics));
   }
   return res.json() as Promise<T>;
 }
 
 export async function fetchTanks(apiKey: string): Promise<{ tanks: Tank[] }> {
-  return request<{ tanks: Tank[] }>('/v1/tanks?limit=100', apiKey);
+  return request<{ tanks: Tank[] }>('GET', CONSOLE_REQUESTS.tanks, apiKey);
 }
 
 export async function fetchReadings(
@@ -175,14 +209,11 @@ export async function fetchReadings(
   tankId: string,
   limit = 1,
 ): Promise<{ readings: Reading[] }> {
-  return request<{ readings: Reading[] }>(
-    `/v1/tanks/${encodeURIComponent(tankId)}/readings?limit=${limit}`,
-    apiKey,
-  );
+  return request<{ readings: Reading[] }>('GET', CONSOLE_REQUESTS.readings(tankId, limit), apiKey);
 }
 
-export async function fetchAlarms(apiKey: string): Promise<{ alarms: Alarm[] }> {
-  return request<{ alarms: Alarm[] }>('/v1/alarms?status=open&limit=100', apiKey);
+export async function fetchAlerts(apiKey: string): Promise<{ alerts: Alert[] }> {
+  return request<{ alerts: Alert[] }>('GET', CONSOLE_REQUESTS.alerts, apiKey);
 }
 
 /**
@@ -191,7 +222,7 @@ export async function fetchAlarms(apiKey: string): Promise<{ alarms: Alarm[] }> 
  * store is the part that is not ready.
  */
 export async function fetchHealth(): Promise<ServiceHealth> {
-  const res = await fetch(apiUrl('/healthz'), {
+  const res = await fetch(apiUrl(CONSOLE_REQUESTS.health), {
     headers: { 'Cache-Control': 'no-store' },
   });
   const body = (await res.json().catch(() => null)) as ServiceHealth | null;

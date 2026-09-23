@@ -96,7 +96,7 @@ The same flag works for the long-running server (`apps/api-server`) via
 Located in `packages/core/src/adapters/prisma/`:
 
 - `client.ts` singleton PrismaClient with globalThis cache for Vercel warm starts + `ensureTenantExists()`
-- `mappers.ts` converts between domain (Site/Tank/Reading/Alarm) and Prisma (Station/Tank/TankReading/Alert)
+- `mappers.ts` converts between domain (Station/Tank/TankReading/Alert) and Prisma models
 - `prisma-repositories.ts` implements `Repositories` port with tenant isolation
 - `prisma-api-key-registry.ts` implements `ApiKeyRegistry` with hashed lookup
 
@@ -156,9 +156,9 @@ apps/web/
   index.html
   src/
     main.tsx
-    App.tsx (polls /v1/tanks, /v1/alarms every 5s)
+    App.tsx (polls /v1/tanks, /v1/alerts every 5s)
     lib/api.ts (fetch wrappers)
-    components/ConnectionPanel, TanksTable, AlarmsList
+    components/ConnectionPanel, TanksTable, AlertsList
     styles.css (no purple hues)
 ```
 
@@ -258,4 +258,4 @@ With this branch:
 1. Push to GitHub
 2. Vercel auto-deploys frontend + backend
 3. Supabase holds data
-4. Visit `https://your-app.vercel.app`, paste API key from env, see tanks and alarms
+4. Visit `https://your-app.vercel.app`, paste API key from env, see tanks and alerts

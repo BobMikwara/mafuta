@@ -36,13 +36,30 @@ looks exactly like a rejected key. Point it at a durable store, or pass
 npm run build
 cat key.txt | npm run key:verify -- --tenant demo-tenant
 npm run key:list -- --tenant demo-tenant
+npm run key:revoke -- --tenant demo-tenant --key-id <id-from-list>
 ```
 
 `key:verify` reads the key from stdin on purpose: command line arguments are
 visible in the process table and land in shell history. It prints the tenant,
 the key id and the scopes, or `REJECTED` with a reason, and it never echoes the
 key. `key:list` shows ids, names, statuses and last use, never key material or
-hashes.
+hashes. `key:revoke` retires a key id so it stops authenticating.
+
+## Rotate or revoke a key
+
+Rotation is provision, then revoke:
+
+1. `npm run key:provision -- --tenant <id> --name <label>` for the replacement key.
+2. Update every caller with the new secret (it is shown exactly once).
+3. `cat key.txt | npm run key:verify -- --tenant <id>` to confirm the replacement works.
+4. `npm run key:revoke -- --tenant <id> --key-id <old-id>` to retire the old key. Ids come
+   from `key:list`.
+
+A revoked key is answered exactly like an unknown one (the same 401 body), so the
+revocation endpoint cannot be used to probe which ids exist. `key:revoke` is idempotent:
+revoking an already revoked key reports `already revoked` and succeeds. Like provisioning,
+it refuses the in-memory store unless `--allow-ephemeral` is passed, because a revocation
+the running deployment cannot see is worse than none at all.
 
 ## Diagnose a rejection in this order
 

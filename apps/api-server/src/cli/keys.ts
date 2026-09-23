@@ -101,3 +101,37 @@ export async function verifyApiKey(input: VerifyInput): Promise<VerifyOutcome> {
 
   return { ok: true, record };
 }
+
+export interface RevokeInput {
+  readonly apiKeys: ApiKeyRegistry;
+  readonly tenantId: string;
+  readonly keyId: string;
+}
+
+export type RevokeOutcome =
+  | { readonly ok: true; readonly alreadyRevoked: boolean }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Revokes a credential so it can no longer authenticate. The lookup is scoped
+ * to the caller's tenant first, so an unknown id and a key held by another
+ * tenant are answered identically and existence is never confirmed across
+ * tenants. Rotation is provision then revoke: issue the replacement, update
+ * every caller, and only then retire the old id.
+ */
+export async function revokeApiKey(input: RevokeInput): Promise<RevokeOutcome> {
+  const tenantId = toTenantId(input.tenantId);
+  const keys = await input.apiKeys.list(tenantId);
+  const target = keys.find((key) => key.id === input.keyId);
+  if (target === undefined) {
+    return {
+      ok: false,
+      reason: `key ${input.keyId} is not provisioned for tenant ${input.tenantId}. Check the id with the list command`,
+    };
+  }
+  if (target.status === 'revoked') {
+    return { ok: true, alreadyRevoked: true };
+  }
+  await input.apiKeys.revoke(tenantId, target.id);
+  return { ok: true, alreadyRevoked: false };
+}
