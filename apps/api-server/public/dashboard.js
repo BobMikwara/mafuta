@@ -34,7 +34,10 @@
     if (/^Bearer\s+/i.test(key)) {
       key = key.replace(/^Bearer\s+/i, '').trim();
     }
-    if ((key.charAt(0) === '"' && key.charAt(key.length - 1) === '"') || (key.charAt(0) === "'" && key.charAt(key.length - 1) === "'")) {
+    if (
+      (key.charAt(0) === '"' && key.charAt(key.length - 1) === '"') ||
+      (key.charAt(0) === "'" && key.charAt(key.length - 1) === "'")
+    ) {
       key = key.slice(1, -1).trim();
     }
     return key;
@@ -42,24 +45,45 @@
 
   function request(path, key) {
     var secret = normalizeKey(key);
+    var method = 'GET';
+    // Diagnostics name the method and URL path (never the query string, never
+    // the key) so a failure can be matched against the server's route table.
+    var pathOnly = path.split('?')[0] || path;
     return fetch(path, {
-      method: 'GET',
+      method: method,
       headers: { authorization: 'Bearer ' + secret, accept: 'application/json' },
       cache: 'no-store',
-    }).then(function (response) {
-      if (response.status === 401) {
-        throw new Error('The API key was rejected. Check the key and try again.');
-      }
-      if (!response.ok) {
-        throw new Error('Request failed with status ' + response.status);
-      }
-      return response.json();
-    }, function (error) {
-      if (error && /Failed to fetch|NetworkError|Load failed/i.test(error.message || '')) {
-        throw new Error('Unable to reach the API. Check that the API is running and CORS is configured.');
-      }
-      throw error;
-    });
+    }).then(
+      function (response) {
+        if (response.status === 401) {
+          throw new Error(
+            'The API key was rejected [' +
+              method +
+              ' ' +
+              pathOnly +
+              ' status 401]. Check the key and try again.',
+          );
+        }
+        if (!response.ok) {
+          throw new Error(
+            'Request failed [' + method + ' ' + pathOnly + ' status ' + response.status + ']',
+          );
+        }
+        return response.json();
+      },
+      function (error) {
+        if (error && /Failed to fetch|NetworkError|Load failed/i.test(error.message || '')) {
+          throw new Error(
+            'Unable to reach the API [' +
+              method +
+              ' ' +
+              pathOnly +
+              ' no response]. Check that the API is running and CORS is configured.',
+          );
+        }
+        throw error;
+      },
+    );
   }
 
   function renderTanks(tanks, latestByTank) {
@@ -107,24 +131,24 @@
       .join('');
   }
 
-  function renderAlarms(alarms) {
-    var list = element('alarms-list');
-    if (alarms.length === 0) {
-      list.innerHTML = '<li class="empty">No open alarms.</li>';
+  function renderAlerts(alerts) {
+    var list = element('alert-list');
+    if (alerts.length === 0) {
+      list.innerHTML = '<li class="empty">No open alerts.</li>';
       return;
     }
-    list.innerHTML = alarms
-      .map(function (alarm) {
+    list.innerHTML = alerts
+      .map(function (alert) {
         return [
           '<li>',
           '<span class="tag ' +
-            escapeText(alarm.severity) +
+            escapeText(alert.severity) +
             '">' +
-            escapeText(alarm.severity) +
+            escapeText(alert.severity) +
             '</span>',
-          '<strong>' + escapeText(alarm.type) + '</strong>',
-          '<span>' + escapeText(alarm.message) + '</span>',
-          '<span class="when">' + escapeText(alarm.raisedAt) + '</span>',
+          '<strong>' + escapeText(alert.type) + '</strong>',
+          '<span>' + escapeText(alert.message) + '</span>',
+          '<span class="when">' + escapeText(alert.raisedAt) + '</span>',
           '</li>',
         ].join('');
       })
@@ -133,12 +157,12 @@
 
   function refresh(key) {
     var tanksPromise = request('/v1/tanks?limit=50', key);
-    var alarmsPromise = request('/v1/alarms?status=open&limit=50', key);
+    var alertsPromise = request('/v1/alerts?status=open&limit=50', key);
 
-    return Promise.all([tanksPromise, alarmsPromise])
+    return Promise.all([tanksPromise, alertsPromise])
       .then(function (results) {
         var tanks = results[0].tanks || [];
-        var alarms = results[1].alarms || [];
+        var alerts = results[1].alerts || [];
         return Promise.all(
           tanks.map(function (tank) {
             return request(
@@ -161,7 +185,7 @@
             }
           });
           renderTanks(tanks, latestByTank);
-          renderAlarms(alarms);
+          renderAlerts(alerts);
           status('Connected. Last update ' + new Date().toLocaleTimeString(), 'ready');
         });
       })
@@ -201,7 +225,7 @@
     window.sessionStorage.removeItem(KEY_STORAGE);
     element('api-key').value = '';
     element('tanks-body').innerHTML = '<tr><td colspan="8" class="empty">No data loaded.</td></tr>';
-    element('alarms-list').innerHTML = '<li class="empty">No data loaded.</li>';
+    element('alert-list').innerHTML = '<li class="empty">No data loaded.</li>';
     status('Disconnected');
   });
 

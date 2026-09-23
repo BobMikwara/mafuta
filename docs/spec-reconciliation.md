@@ -100,3 +100,16 @@ Tests: `packages/core/test/idempotency.test.ts`, the `ingest idempotency` block 
 `packages/core/test/ingest-service.test.ts`, the `reading ingestion idempotency` block in
 `packages/api/test/api.test.ts`, and `prisma/test/idempotency-migration.test.ts`, which
 applies both migrations to real PostgreSQL.
+
+### Console alert route (done)
+
+The consoles answered `404 {"error":"not_found","message":"No route matches this request"}`
+the moment an API key was connected, because they polled `GET /v1/alarms` while the v1
+surface registers alerts at `GET /v1/alerts` (PRD section 5 names the feature "Alerts").
+The stale path shipped with the React console rewrite and also lived in the vanilla
+console and in this document's own wiring notes. Both consoles now read `GET /v1/alerts`
+and the `{ alerts }` envelope, `apps/web` types the response as `Alert` and tanks carry
+`stationId`, and `packages/api/test/console-contract.test.ts` replays the exact requests
+the consoles issue (from the exported `CONSOLE_REQUESTS` constant) against a real server,
+so a rename on either side fails CI instead of the connection panel. The credentials CLI
+gained `revoke` so a key can be retired: rotation is provision, update callers, revoke.

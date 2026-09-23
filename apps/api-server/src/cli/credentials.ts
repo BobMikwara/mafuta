@@ -1,7 +1,11 @@
 import { pathToFileURL } from 'node:url';
-import { createPlatformDependencies, shouldUsePrisma } from '@fueltrack/api';
+import {
+  createPlatformDependencies,
+  shouldUsePrisma,
+  type PlatformDependencies,
+} from '@fueltrack/api';
 import { systemClock, toTenantId } from '@fueltrack/core';
-import { defaultScopes, provisionApiKey, verifyApiKey } from './keys.js';
+import { defaultScopes, provisionApiKey, revokeApiKey, verifyApiKey } from './keys.js';
 
 /**
  * Operator CLI for the API key lifecycle. Exists because the API key is the
@@ -14,6 +18,7 @@ import { defaultScopes, provisionApiKey, verifyApiKey } from './keys.js';
  *   node apps/api-server/dist/cli/credentials.js provision --tenant <id> --name <label>
  *   node apps/api-server/dist/cli/credentials.js verify [--tenant <id>] < key.txt
  *   node apps/api-server/dist/cli/credentials.js list --tenant <id>
+ *   node apps/api-server/dist/cli/credentials.js revoke --tenant <id> --key-id <id>
  *
  * The presented key for `verify` is read from stdin, never from an argument,
  * because arguments are visible in the process table and land in shell history.
@@ -27,19 +32,21 @@ export const CREDENTIALS_USAGE = [
   '  provision     Issue an API key and print it once',
   '  verify        Check whether this deployment accepts a key read from stdin',
   '  list          List provisioned keys for a tenant (never prints key material)',
+  '  revoke        Revoke a key so it no longer authenticates (ids come from list)',
   '',
   'Options:',
   '  --tenant <id>    Tenant identifier (default: FUELTRACK_DEMO_TENANT_ID or demo-tenant)',
   '  --name <label>   Human readable label (default: operator-provisioned-key)',
+  '  --key-id <id>    Key identifier to revoke (required for revoke)',
   '  --scopes <list>  Comma separated scopes (default: all API_KEY_SCOPES)',
-  '  --allow-ephemeral Provision into the in-memory store (see the note below)',
+  '  --allow-ephemeral Write to the in-memory store (see the note below)',
   '  --help           Show this message',
   '',
   'Persistence follows the same environment as the API: USE_PRISMA=true or a',
   'DATABASE_URL selects Postgres, otherwise an in-memory store is used. The',
-  'in-memory store belongs to one process, so provisioning refuses to write to',
-  'it unless --allow-ephemeral is passed: a key no server can see is exactly how',
-  'a correct key ends up being reported as rejected.',
+  'in-memory store belongs to one process, so provisioning and revoking refuse',
+  'to write it unless --allow-ephemeral is passed: a key no server can see is',
+  'exactly how a correct key ends up being reported as rejected.',
 ].join('\n');
 
 export class UsageError extends Error {
@@ -50,12 +57,13 @@ export class UsageError extends Error {
 }
 
 export interface CliOptions {
-  readonly command: 'provision' | 'verify' | 'list';
+  readonly command: 'provision' | 'verify' | 'list' | 'revoke';
   readonly tenantId: string;
   readonly name: string;
+  readonly keyId: string;
   readonly scopes: ReadonlyArray<string>;
   /**
-   * Allows provisioning into the in-memory store. Off by default because a key
+   * Allows writes to the in-memory store. Off by default because a key
    * written to a process that exits immediately is a key no server can accept,
    * which is indistinguishable from a rejected key at the console.
    */
@@ -79,12 +87,18 @@ export function parseCliOptions(
   }
 
   const command = argv[0];
-  if (command !== 'provision' && command !== 'verify' && command !== 'list') {
+  if (
+    command !== 'provision' &&
+    command !== 'verify' &&
+    command !== 'list' &&
+    command !== 'revoke'
+  ) {
     throw new UsageError(`Unknown command "${String(command)}"\n\n${CREDENTIALS_USAGE}`);
   }
 
   let tenantId = env['FUELTRACK_DEMO_TENANT_ID']?.trim() || 'demo-tenant';
   let name = 'operator-provisioned-key';
+  let keyId = '';
   let scopes: ReadonlyArray<string> = defaultScopes();
   let allowEphemeral = false;
 
@@ -97,6 +111,10 @@ export function parseCliOptions(
         break;
       case '--name':
         name = readFlag(argv, index, flag);
+        index += 1;
+        break;
+      case '--key-id':
+        keyId = readFlag(argv, index, flag);
         index += 1;
         break;
       case '--scopes': {
@@ -120,7 +138,11 @@ export function parseCliOptions(
     throw new UsageError('--scopes must name at least one scope');
   }
 
-  return { command, tenantId, name, scopes, allowEphemeral };
+  if (command === 'revoke' && keyId.length === 0) {
+    throw new UsageError('revoke requires --key-id <id> (find the id with the list command)');
+  }
+
+  return { command, tenantId, name, keyId, scopes, allowEphemeral };
 }
 
 /**
@@ -141,6 +163,12 @@ export interface RunOptions {
   readonly env: NodeJS.ProcessEnv;
   readonly stdin: NodeJS.ReadStream;
   readonly write: (line: string) => void;
+  /**
+   * Test seam. When supplied, the commands run against this dependency set, so
+   * a test can provision, revoke and verify against one shared store the way a
+   * durable deployment works.
+   */
+  readonly dependencies?: PlatformDependencies;
 }
 
 /** Returns the process exit code. Split from `process` so it can be tested. */
@@ -159,11 +187,13 @@ export async function runCredentialsCli(options: RunOptions): Promise<number> {
   // The same environment the API uses decides which store is provisioned. The
   // env is passed explicitly so `USE_PRISMA`/`DATABASE_URL` resolution is
   // identical to a request path and independent of ambient process state.
-  const dependencies = createPlatformDependencies({
-    minLogLevel: 'error',
-    clock: systemClock,
-    usePrisma: shouldUsePrisma(undefined, options.env),
-  });
+  const dependencies =
+    options.dependencies ??
+    createPlatformDependencies({
+      minLogLevel: 'error',
+      clock: systemClock,
+      usePrisma: shouldUsePrisma(undefined, options.env),
+    });
 
   if (parsed.command === 'list') {
     const keys = await dependencies.apiKeys.list(toTenantId(parsed.tenantId));
@@ -206,6 +236,38 @@ export async function runCredentialsCli(options: RunOptions): Promise<number> {
     }
     options.write(
       `OK tenant=${outcome.record.tenantId} keyId=${outcome.record.id} name=${outcome.record.name} scopes=${outcome.record.scopes.join(',')}`,
+    );
+    return 0;
+  }
+
+  if (parsed.command === 'revoke') {
+    if (dependencies.persistence === 'memory' && !parsed.allowEphemeral) {
+      options.write(
+        'Refusing to revoke from the in-memory store: the running deployment would keep accepting the key, because this process holds its own copy of the store.',
+      );
+      options.write(
+        'Set USE_PRISMA=true and DATABASE_URL to revoke against the durable credential store, or pass --allow-ephemeral for an in-process test.',
+      );
+      return 1;
+    }
+    const outcome = await revokeApiKey({
+      apiKeys: dependencies.apiKeys,
+      tenantId: parsed.tenantId,
+      keyId: parsed.keyId,
+    });
+    if (!outcome.ok) {
+      options.write(`NOT REVOKED ${outcome.reason}`);
+      return 1;
+    }
+    if (outcome.alreadyRevoked) {
+      options.write(`Key ${parsed.keyId} is already revoked.`);
+      return 0;
+    }
+    options.write(
+      `Revoked key ${parsed.keyId} for tenant ${parsed.tenantId}. It no longer authenticates.`,
+    );
+    options.write(
+      'To replace it, provision a new key, update every caller, then revoke the old key id.',
     );
     return 0;
   }

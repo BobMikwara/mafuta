@@ -3,9 +3,11 @@ import type { ServiceHealth } from '../src/lib/api.js';
 
 /**
  * The console is the surface that reported "API key rejected" for a key that
- * was correct. These tests pin the two behaviors that fix the report: the
- * message names the API that answered, and a provisioning fault on the server
- * is no longer described as a bad key. No test asserts on a secret, because the
+ * was correct, and later a 404 "No route matches this request" while connecting.
+ * These tests pin the behaviors that fix those reports: the request paths match
+ * the v1 route table, every failure names its method, path and status code, the
+ * message names the API that answered, and a provisioning fault on the server is
+ * no longer described as a bad key. No test asserts on a secret, because the
  * client never logs or echoes one.
  */
 
@@ -15,8 +17,13 @@ const API_ORIGIN = 'https://api.example.test';
 interface ApiModule {
   normalizeApiKey(raw: string): string;
   apiTarget(): string;
-  describeApiFailure(status: number, body: { error?: string; message?: string }): string;
+  describeApiFailure(
+    status: number,
+    body: { error?: string; message?: string },
+    diagnostics?: { method: string; path: string },
+  ): string;
   fetchTanks(apiKey: string): Promise<{ tanks: unknown[] }>;
+  fetchAlerts(apiKey: string): Promise<{ alerts: unknown[] }>;
   fetchHealth(): Promise<ServiceHealth>;
 }
 
@@ -76,6 +83,20 @@ describe('api target reporting', () => {
     expect(message).toContain(API_ORIGIN);
     expect(message).not.toContain('API key rejected');
   });
+
+  it('includes method, path and status in every failure message', async () => {
+    const { describeApiFailure } = await loadApiModule();
+    const message = describeApiFailure(
+      404,
+      { message: 'No route matches this request' },
+      {
+        method: 'GET',
+        path: '/v1/alerts',
+      },
+    );
+    expect(message).toContain('GET /v1/alerts');
+    expect(message).toContain('status 404');
+  });
 });
 
 describe('requests', () => {
@@ -119,6 +140,62 @@ describe('requests', () => {
     });
 
     await expect(fetchTanks('ftk_key_secret')).rejects.toThrow(/Unable to reach the API/);
+  });
+});
+
+describe('alerts request contract', () => {
+  it('reads open alerts from GET /v1/alerts with the alerts envelope', async () => {
+    const { fetchAlerts } = await loadApiModule();
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(
+        {
+          alerts: [
+            {
+              id: 'alt-1',
+              tankId: null,
+              type: 'stale_data',
+              severity: 'warning',
+              status: 'open',
+              message: 'No reading for 60 minutes',
+              raisedAt: '2026-01-01T00:00:00.000Z',
+            },
+          ],
+        },
+        200,
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchAlerts('ftk_key_secret');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`${API_ORIGIN}/v1/alerts?status=open&limit=100`);
+    expect(url).not.toContain('ftk_key_secret');
+    expect(init.method).toBe('GET');
+    expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer ftk_key_secret');
+    expect(result.alerts).toHaveLength(1);
+  });
+
+  it('reports a missing route with method, path and status and never the key', async () => {
+    const { fetchAlerts } = await loadApiModule();
+    vi.stubGlobal('fetch', async () =>
+      jsonResponse(
+        { error: 'not_found', message: 'No route matches this request', requestId: 'req-test' },
+        404,
+      ),
+    );
+
+    const failure = await fetchAlerts('ftk_key_secret').then(
+      () => 'resolved',
+      (error: unknown) => (error instanceof Error ? error.message : 'not an error'),
+    );
+
+    expect(failure).toContain('GET /v1/alerts');
+    expect(failure).toContain('status 404');
+    expect(failure).toContain('No route matches this request');
+    expect(failure).toContain(API_ORIGIN);
+    expect(failure).not.toContain('ftk_key_secret');
   });
 });
 

@@ -1,16 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ConnectionPanel } from './components/ConnectionPanel';
 import { TanksTable } from './components/TanksTable';
-import { AlarmsList } from './components/AlarmsList';
+import { AlertsList } from './components/AlertsList';
 import {
   fetchTanks,
   fetchReadings,
-  fetchAlarms,
+  fetchAlerts,
   fetchHealth,
   normalizeApiKey,
   type Tank,
   type Reading,
-  type Alarm,
+  type Alert,
   type ServiceHealth,
 } from './lib/api';
 
@@ -29,7 +29,7 @@ export default function App() {
   });
   const [tanks, setTanks] = useState<Tank[]>([]);
   const [latestByTank, setLatestByTank] = useState<Record<string, Reading>>({});
-  const [alarms, setAlarms] = useState<Alarm[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
   const [status, setStatus] = useState('Enter API key to connect');
   const [statusKind, setStatusKind] = useState<'idle' | 'ready' | 'error'>('idle');
   const [health, setHealth] = useState<ServiceHealth | null>(null);
@@ -53,7 +53,7 @@ export default function App() {
 
   const refresh = useCallback(async (key: string) => {
     try {
-      const [tanksRes, alarmsRes] = await Promise.all([fetchTanks(key), fetchAlarms(key)]);
+      const [tanksRes, alertsRes] = await Promise.all([fetchTanks(key), fetchAlerts(key)]);
       const tankList = tanksRes.tanks || [];
       setTanks(tankList);
 
@@ -73,7 +73,7 @@ export default function App() {
         if (entry.reading) map[entry.tankId] = entry.reading;
       }
       setLatestByTank(map);
-      setAlarms(alarmsRes.alarms || []);
+      setAlerts(alertsRes.alerts || []);
       setStatus(`Connected. Last update ${new Date().toLocaleTimeString()}`);
       setStatusKind('ready');
     } catch (err) {
@@ -118,7 +118,7 @@ export default function App() {
     setApiKey('');
     setTanks([]);
     setLatestByTank({});
-    setAlarms([]);
+    setAlerts([]);
     setStatus('Disconnected');
     setStatusKind('idle');
   };
@@ -148,7 +148,7 @@ export default function App() {
 
         <TanksTable tanks={tanks} latestByTank={latestByTank} />
 
-        <AlarmsList alarms={alarms} />
+        <AlertsList alerts={alerts} />
 
         <p className="footnote">
           Values tagged as <code>simulated</code> are synthetic and never presented as device

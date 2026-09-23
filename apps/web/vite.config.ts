@@ -6,6 +6,10 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    // The live preview reaches this dev server through a generated host name.
+    // Vite 6 rejects unknown hosts by default, so the preview domains are
+    // allow-listed here (a leading dot covers every subdomain).
+    allowedHosts: ['.e2b.app'],
     proxy: {
       '/v1': {
         target: 'http://localhost:3000',
