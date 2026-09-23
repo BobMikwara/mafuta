@@ -43,6 +43,51 @@
     return key;
   }
 
+  function readErrorBody(response) {
+    return response.text().then(
+      function (text) {
+        try {
+          var parsed = JSON.parse(text);
+          return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch {
+          return {};
+        }
+      },
+      function () {
+        return {};
+      },
+    );
+  }
+
+  function failure(message, kind) {
+    var error = new Error(message);
+    error.kind = kind;
+    return error;
+  }
+
+  // Server error bodies carry a non-secret message (and, for a 403, the
+  // missing scope). They are shown as text through textContent, never as HTML.
+  function describeFailure(response, body, line) {
+    var requestId = body.requestId ? ' Request id: ' + body.requestId + '.' : '';
+    if (response.status === 401) {
+      return failure(
+        'The API key was rejected ' + line + '. It is unknown, revoked or expired.',
+        'unauthorized',
+      );
+    }
+    if (response.status === 403) {
+      return failure(
+        'Access denied. ' +
+          (body.message || 'This key is not permitted to make this request.') +
+          requestId +
+          ' ' +
+          line,
+        'forbidden',
+      );
+    }
+    return failure((body.message || 'Request failed') + requestId + ' ' + line, 'other');
+  }
+
   function request(path, key) {
     var secret = normalizeKey(key);
     var method = 'GET';
@@ -55,30 +100,23 @@
       cache: 'no-store',
     }).then(
       function (response) {
-        if (response.status === 401) {
-          throw new Error(
-            'The API key was rejected [' +
-              method +
-              ' ' +
-              pathOnly +
-              ' status 401]. Check the key and try again.',
-          );
+        if (response.ok) {
+          return response.json();
         }
-        if (!response.ok) {
-          throw new Error(
-            'Request failed [' + method + ' ' + pathOnly + ' status ' + response.status + ']',
-          );
-        }
-        return response.json();
+        var line = '[' + method + ' ' + pathOnly + ' status ' + response.status + ']';
+        return readErrorBody(response).then(function (body) {
+          throw describeFailure(response, body, line);
+        });
       },
       function (error) {
         if (error && /Failed to fetch|NetworkError|Load failed/i.test(error.message || '')) {
-          throw new Error(
+          throw failure(
             'Unable to reach the API [' +
               method +
               ' ' +
               pathOnly +
               ' no response]. Check that the API is running and CORS is configured.',
+            'network',
           );
         }
         throw error;
@@ -155,14 +193,35 @@
       .join('');
   }
 
+  function renderAlertsError(message) {
+    var list = element('alert-list');
+    list.innerHTML = '';
+    var item = document.createElement('li');
+    item.className = 'empty error';
+    item.textContent = message;
+    list.appendChild(item);
+  }
+
   function refresh(key) {
     var tanksPromise = request('/v1/tanks?limit=50', key);
-    var alertsPromise = request('/v1/alerts?status=open&limit=50', key);
+    // Alerts are loaded independently: a key that may read tanks but not
+    // alerts (403) still gets a working tank table and a precise alert error.
+    var alertsPromise = request('/v1/alerts?status=open&limit=50', key).then(
+      function (payload) {
+        return { alerts: payload.alerts || [], error: null };
+      },
+      function (error) {
+        return { alerts: null, error: error };
+      },
+    );
 
     return Promise.all([tanksPromise, alertsPromise])
       .then(function (results) {
         var tanks = results[0].tanks || [];
-        var alerts = results[1].alerts || [];
+        var alertsResult = results[1];
+        if (alertsResult.error && alertsResult.error.kind === 'unauthorized') {
+          throw alertsResult.error;
+        }
         return Promise.all(
           tanks.map(function (tank) {
             return request(
@@ -185,11 +244,22 @@
             }
           });
           renderTanks(tanks, latestByTank);
-          renderAlerts(alerts);
-          status('Connected. Last update ' + new Date().toLocaleTimeString(), 'ready');
+          var time = new Date().toLocaleTimeString();
+          if (alertsResult.error) {
+            renderAlertsError(alertsResult.error.message);
+            status('Connected with limited access. Last update ' + time, 'warning');
+          } else {
+            renderAlerts(alertsResult.alerts);
+            status('Connected. Last update ' + time, 'ready');
+          }
         });
       })
       .catch(function (error) {
+        if (error && error.kind === 'unauthorized') {
+          // The same key cannot start working by itself; stop polling it.
+          stop();
+          window.sessionStorage.removeItem(KEY_STORAGE);
+        }
         status(error.message || 'Unable to load data', 'error');
       });
   }

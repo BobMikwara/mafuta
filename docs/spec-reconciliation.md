@@ -113,3 +113,21 @@ and the `{ alerts }` envelope, `apps/web` types the response as `Alert` and tank
 the consoles issue (from the exported `CONSOLE_REQUESTS` constant) against a real server,
 so a rename on either side fails CI instead of the connection panel. The credentials CLI
 gained `revoke` so a key can be retired: rotation is provision, update callers, revoke.
+
+### Console alert 403 (done)
+
+The console reported `The API rejected the request without a message [GET
+/v1/alerts status 403]`. Root cause: the site/alarm to station/alert rename
+changed `API_KEY_SCOPES` but not the scopes already stored in `api_keys`, so
+keys issued before it held `alarms:read` while the route requires
+`alerts:read`. Tanks loaded (`tanks:read` was never renamed) and alerts were
+refused, and the 403 body carried no `message`. Fix: `normalizeScopes`
+(`packages/core/src/tenancy/scopes.ts`) maps the four retired names one to one
+at authentication, migration `0004_rename_legacy_scopes` rewrites stored rows,
+and a missing scope now answers 403 with `reason: insufficient_scope`, the
+scope name and a message. The console shows the server message, tells 401 from
+403, keeps tanks working when only alerts are refused, and offers Retry.
+
+The same investigation found that `/healthz` reported `"database":"unmigrated"`
+for every database: the schema probe interpolated a pre-joined table list into
+`$queryRaw`, which Prisma binds as one string. It now binds a `text[]`.

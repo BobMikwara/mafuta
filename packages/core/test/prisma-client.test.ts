@@ -122,3 +122,19 @@ describe('describePrismaSchemaStatus', () => {
     });
   });
 });
+
+describe('describePrismaSchemaStatus query binding', () => {
+  it('binds the required tables as one array parameter, not as a joined string', async () => {
+    mockPrisma.$queryRaw.mockResolvedValueOnce(
+      REQUIRED_TABLES.map((name) => ({ table_name: name })),
+    );
+    await describePrismaSchemaStatus();
+
+    const [strings, ...values] = mockPrisma.$queryRaw.mock.calls.at(-1) as [
+      TemplateStringsArray,
+      ...unknown[],
+    ];
+    expect(strings.join('?')).toContain('= ANY(?::text[])');
+    expect(values).toEqual([[...REQUIRED_TABLES]]);
+  });
+});

@@ -2,7 +2,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   CredentialsNotProvisionedError,
   enforceRateLimit,
-  ForbiddenError,
+  InsufficientScopeError,
+  isLegacyScope,
+  missingScopes,
+  normalizeScopes,
   runWithTenantContext,
   UnauthorizedError,
   type ApiKeyRegistry,
@@ -167,9 +170,38 @@ function rejectUnpresentedCredential(
   throw new UnauthorizedError('Missing bearer credentials');
 }
 
+/**
+ * Reports, once per credential per process, that a key still carries scope
+ * names from the retired site/alarm vocabulary. The key keeps working through
+ * `normalizeScopes`, but the stored row should be rewritten by migration
+ * `0004_rename_legacy_scopes`, and this log line is how an operator learns that
+ * the migration has not run against this database yet. Key id only, never
+ * key material.
+ */
+function reportLegacyScopes(
+  record: { readonly id: string; readonly scopes: ReadonlyArray<string> },
+  dependencies: AuthDependencies,
+  reported: Set<string>,
+): void {
+  if (reported.has(record.id)) {
+    return;
+  }
+  const legacy = record.scopes.filter(isLegacyScope);
+  if (legacy.length === 0) {
+    return;
+  }
+  reported.add(record.id);
+  dependencies.logger.warn('auth.legacy_scopes', {
+    keyId: record.id,
+    legacyScopes: legacy,
+    hint: 'Apply migration 0004_rename_legacy_scopes (FUELTRACK_AUTO_MIGRATE=true or npm run db:deploy) to rewrite stored scope names.',
+  });
+}
+
 async function resolveTenantContext(
   request: FastifyRequest,
   dependencies: AuthDependencies,
+  reportedLegacyKeys: Set<string>,
 ): Promise<TenantContext> {
   const header = request.headers.authorization;
   if (typeof header !== 'string') {
@@ -201,17 +233,23 @@ async function resolveTenantContext(
     }
   }
 
+  reportLegacyScopes(record, dependencies, reportedLegacyKeys);
+
   return {
     tenantId: record.tenantId,
     principalId: `key:${record.id}` as TenantContext['principalId'],
     apiKeyId: record.id,
-    scopes: record.scopes,
+    // Normalized so a key stored with the retired `alarms:*` / `sites:*` names
+    // is checked against the permission it was actually granted. The mapping is
+    // a one to one rename and never widens what a key may do.
+    scopes: normalizeScopes(record.scopes),
     ...(request.id === undefined ? {} : { requestId: request.id }),
   };
 }
 
 export function registerAuthentication(app: FastifyInstance, dependencies: AuthDependencies): void {
   app.decorateRequest('tenantContext', undefined);
+  const reportedLegacyKeys = new Set<string>();
 
   app.addHook('onRequest', (request: FastifyRequest, _reply: FastifyReply, done) => {
     // CORS preflight must not require credentials. The global CORS hook in
@@ -223,7 +261,7 @@ export function registerAuthentication(app: FastifyInstance, dependencies: AuthD
       return done();
     }
 
-    resolveTenantContext(request, dependencies)
+    resolveTenantContext(request, dependencies, reportedLegacyKeys)
       .then((context) => {
         request.tenantContext = context;
         // Continuing the lifecycle from inside the async context means every
@@ -242,10 +280,11 @@ export function requireScopes(...required: ReadonlyArray<string>) {
     if (context === undefined) {
       throw new UnauthorizedError();
     }
-    const granted = new Set(context.scopes);
-    const missing = required.filter((scope) => !granted.has(scope));
+    const missing = missingScopes(context.scopes, required);
     if (missing.length > 0) {
-      throw new ForbiddenError('The credential does not grant the required scope');
+      // Authenticated but not authorized: a 403 that names the missing scope,
+      // so the console can say what to ask for instead of a bare "forbidden".
+      throw new InsufficientScopeError(missing);
     }
   };
 }

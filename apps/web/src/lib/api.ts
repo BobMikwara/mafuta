@@ -1,3 +1,20 @@
+import {
+  ApiError,
+  classifyFailure,
+  describeApiFailure as describeFailure,
+  readErrorBody,
+  type ApiErrorBody,
+  type RequestDiagnostics,
+} from './api-errors.js';
+
+export {
+  ApiError,
+  isApiError,
+  type ApiErrorBody,
+  type ApiErrorKind,
+  type RequestDiagnostics,
+} from './api-errors.js';
+
 export interface Tank {
   id: string;
   stationId: string;
@@ -104,68 +121,16 @@ export function normalizeApiKey(raw: string): string {
   return key;
 }
 
-interface ApiErrorBody {
-  error?: string;
-  message?: string;
-  requestId?: string;
-}
-
 /**
- * Non-secret diagnostics for a failed request: method and URL path only. The
- * query string is omitted (it carries filters, not identity) and the
- * Authorization header is never part of any message.
- */
-export interface RequestDiagnostics {
-  readonly method: string;
-  readonly path: string;
-}
-
-async function readErrorBody(res: Response): Promise<ApiErrorBody> {
-  const text = await res.text();
-  try {
-    return JSON.parse(text) as ApiErrorBody;
-  } catch {
-    // Non-JSON error bodies (proxy or platform pages) carry no structured
-    // message. A short single-line excerpt is kept for diagnostics; long or
-    // empty bodies are dropped rather than dumped into the UI.
-    const excerpt = text.replace(/\s+/g, ' ').trim().slice(0, 120);
-    return excerpt.length > 0 ? { message: excerpt } : {};
-  }
-}
-
-function requestLine(status: number, diagnostics: RequestDiagnostics | undefined): string {
-  const target = diagnostics === undefined ? '' : `${diagnostics.method} ${diagnostics.path} `;
-  return `[${target}status ${status}]`;
-}
-
-/**
- * Error text for one kind of server rejection. The key itself is never echoed,
- * and neither is any part of it: only the server's non-secret error code, its
- * message, the request method and path, the status code, and the API the
- * console reached.
+ * Error text for one kind of server rejection, bound to the API this console
+ * is talking to. See `api-errors.ts` for the classification rules.
  */
 export function describeApiFailure(
   status: number,
   body: ApiErrorBody,
   diagnostics?: RequestDiagnostics,
 ): string {
-  const line = requestLine(status, diagnostics);
-  if (status === 503 && body.error === 'credentials_not_provisioned') {
-    // The server is reachable and the key may well be correct: nothing is
-    // provisioned on the server side, so blaming the pasted key would be wrong.
-    return [
-      'This deployment has no API key provisioned, so no key can be accepted yet.',
-      'Provision one on the server (npm run key:provision) or start it with FUELTRACK_SEED_DEMO=true and FUELTRACK_DEV_API_KEY, then reconnect.',
-      line,
-      `API: ${apiTarget()}`,
-    ].join(' ');
-  }
-  if (status === 401) {
-    const detail = body.message ? ` ${body.message}` : '';
-    return `API key rejected. Check the key and try again.${detail} ${line} API: ${apiTarget()}`;
-  }
-  const explanation = body.message ?? 'The API rejected the request without a message';
-  return `${explanation} ${line} API: ${apiTarget()}`;
+  return describeFailure(status, body, apiTarget(), diagnostics);
 }
 
 async function request<T>(method: string, path: string, apiKey: string): Promise<T> {
@@ -185,17 +150,20 @@ async function request<T>(method: string, path: string, apiKey: string): Promise
     const message = error instanceof Error ? error.message : String(error);
     // Fetch throws TypeError on network failure or CORS block. Surface a
     // helpful hint instead of a raw "Failed to fetch".
-    if (/Failed to fetch|NetworkError|Load failed/i.test(message)) {
-      throw new Error(
-        `Unable to reach the API [${diagnostics.method} ${diagnostics.path} no response]. Check VITE_API_URL and that the API allows CORS for this origin. API: ${apiTarget()}`,
-      );
-    }
-    throw new Error(`${message} [${diagnostics.method} ${diagnostics.path} no response]`);
+    const text = /Failed to fetch|NetworkError|Load failed/i.test(message)
+      ? `Unable to reach the API [${diagnostics.method} ${diagnostics.path} no response]. Check your connection, VITE_API_URL and that the API allows CORS for this origin. API: ${apiTarget()}`
+      : `${message} [${diagnostics.method} ${diagnostics.path} no response]`;
+    throw new ApiError({ message: text, kind: 'network', status: null });
   }
 
   if (!res.ok) {
     const body = await readErrorBody(res);
-    throw new Error(describeApiFailure(res.status, body, diagnostics));
+    throw new ApiError({
+      message: describeApiFailure(res.status, body, diagnostics),
+      kind: classifyFailure(res.status, body),
+      status: res.status,
+      body,
+    });
   }
   return res.json() as Promise<T>;
 }
