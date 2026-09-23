@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 
-import type { ServiceHealth } from '../lib/api';
+import { normalizeApiKey, type ServiceHealth } from '../lib/api';
+import type { ConnectionState } from '../hooks/useConsoleData';
 
 interface Props {
   apiKey: string;
   onConnect: (key: string) => void;
   onDisconnect: () => void;
-  status: string;
-  statusKind: 'idle' | 'ready' | 'error';
+  onRetry: () => void;
+  connection: ConnectionState;
   /** Result of the last `/healthz` call, or null when it could not be read. */
   health: ServiceHealth | null;
 }
@@ -21,12 +22,20 @@ function credentialSummary(health: ServiceHealth | null): string {
   return 'API key store state unknown';
 }
 
+const STATUS_LABEL: Record<ConnectionState['kind'], string> = {
+  idle: 'Not connected',
+  connecting: 'Connecting',
+  ready: 'Connected',
+  limited: 'Limited access',
+  error: 'Connection problem',
+};
+
 export function ConnectionPanel({
   apiKey,
   onConnect,
   onDisconnect,
-  status,
-  statusKind,
+  onRetry,
+  connection,
   health,
 }: Props) {
   const [input, setInput] = useState(apiKey);
@@ -38,19 +47,18 @@ export function ConnectionPanel({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     // Normalize so that pasting "Bearer ftk_..." or a quoted value still works.
-    let normalized = input.trim();
-    if (/^Bearer\s+/i.test(normalized)) {
-      normalized = normalized.replace(/^Bearer\s+/i, '').trim();
-    }
-    if (
-      (normalized.startsWith('"') && normalized.endsWith('"')) ||
-      (normalized.startsWith("'") && normalized.endsWith("'"))
-    ) {
-      normalized = normalized.slice(1, -1).trim();
-    }
+    const normalized = normalizeApiKey(input);
     if (!normalized) return;
     onConnect(normalized);
   };
+
+  const handleClear = () => {
+    setInput('');
+    onDisconnect();
+  };
+
+  const canRetry =
+    apiKey.length > 0 && (connection.kind === 'error' || connection.kind === 'limited');
 
   return (
     <section className="panel">
@@ -65,17 +73,26 @@ export function ConnectionPanel({
             onChange={(e) => setInput(e.target.value)}
             placeholder="Paste the API key issued for this tenant"
             spellCheck={false}
+            autoComplete="off"
             className="input"
           />
           <button type="submit" className="btn primary">
             Connect
           </button>
-          <button type="button" className="btn" onClick={onDisconnect}>
+          <button type="button" className="btn" onClick={handleClear}>
             Clear
           </button>
         </div>
       </form>
-      <p className={`status ${statusKind}`}>{status}</p>
+      <div className={`status-block ${connection.kind}`} role="status" aria-live="polite">
+        <span className={`status-label ${connection.kind}`}>{STATUS_LABEL[connection.kind]}</span>
+        <p className={`status ${connection.kind}`}>{connection.message}</p>
+        {canRetry ? (
+          <button type="button" className="btn small-btn" onClick={onRetry}>
+            Retry
+          </button>
+        ) : null}
+      </div>
       <p className="hint">
         API URL: <code>{import.meta.env.VITE_API_URL || window.location.origin}</code>
       </p>

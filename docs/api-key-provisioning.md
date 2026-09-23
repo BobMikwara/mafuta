@@ -109,6 +109,39 @@ the running deployment cannot see is worse than none at all.
    Preview) looks exactly like a wrong key. The console error message now names
    the API origin it reached so this can be ruled out from the screen.
 
+## 403 on GET /v1/alerts for a key that reads tanks
+
+A 403 means the key was accepted and the tenant resolved, but the key lacks a
+scope the route requires. The body now names it:
+
+```json
+{
+  "error": "forbidden",
+  "reason": "insufficient_scope",
+  "message": "This API key does not grant the alerts:read scope required for this request. ...",
+  "requiredScopes": ["alerts:read"],
+  "requestId": "req-..."
+}
+```
+
+and the response carries
+`WWW-Authenticate: Bearer realm="fueltrack", error="insufficient_scope", scope="alerts:read"`.
+The server logs `auth.forbidden` with the key id (never the key) and the
+missing scopes.
+
+Keys issued before the stations/alerts rename (every key created by a
+deployment older than commit `928c865`) were stored with `sites:*` and
+`alarms:*`. Those names are mapped one to one onto `stations:*` and
+`alerts:*` when a key authenticates, so such keys work again without being
+reissued. The mapping never adds a scope the key did not hold: a legacy key
+still cannot read audit logs, devices, events or reports. Migration
+`0004_rename_legacy_scopes` rewrites the stored rows; until it has run, the
+server logs `auth.legacy_scopes` once per key with the key id.
+
+If the 403 persists after that, the key genuinely lacks the scope. Issue a key
+that includes it (`npm run key:provision -- --tenant <id> --scopes ...`) and
+revoke the old one.
+
 ## Environment variables
 
 | Variable                        | Default       | Purpose                                                                                          |

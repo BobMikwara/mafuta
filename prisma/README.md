@@ -15,6 +15,11 @@ prisma/
     0002_idempotency_key/
       migration.sql                 Mandatory, tenant scoped idempotency key.
       rollback.sql                  Reverse step, applied manually.
+    0003_add_api_keys/              Hashed API key store.
+    0004_rename_legacy_scopes/
+      migration.sql                 Data only: renames stored sites:* / alarms:*
+                                    key scopes to stations:* / alerts:*.
+      rollback.sql                  Intentional no-op (see the file).
   test/
     migration.test.ts               Applies the baseline to a real PostgreSQL
                                     instance through PGlite and asserts the

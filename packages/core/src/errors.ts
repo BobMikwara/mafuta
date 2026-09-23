@@ -64,6 +64,25 @@ export class ForbiddenError extends FuelTrackError {
 }
 
 /**
+ * An authenticated credential that lacks a scope the operation requires. The
+ * key is valid and the tenant is resolved; the caller simply is not permitted
+ * to perform this operation. Carries the missing scope names, which are part of
+ * the public API contract (not secrets), so the HTTP layer can tell the caller
+ * exactly which permission to request instead of answering a bare 403.
+ */
+export class InsufficientScopeError extends ForbiddenError {
+  constructor(public readonly requiredScopes: ReadonlyArray<string>) {
+    super(
+      `This API key does not grant the ${requiredScopes.join(', ')} scope${
+        requiredScopes.length === 1 ? '' : 's'
+      } required for this request. Ask an administrator for a key that includes ${
+        requiredScopes.length === 1 ? 'it' : 'them'
+      }.`,
+    );
+  }
+}
+
+/**
  * Raised when a caller exceeds a configured rate limit. The retry delay is part
  * of the error so the HTTP layer can answer 429 with a `Retry-After` header
  * instead of leaving a device to guess when it may try again.

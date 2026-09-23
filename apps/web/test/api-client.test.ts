@@ -19,12 +19,24 @@ interface ApiModule {
   apiTarget(): string;
   describeApiFailure(
     status: number,
-    body: { error?: string; message?: string },
+    body: {
+      error?: string;
+      message?: string;
+      requestId?: string;
+      requiredScopes?: ReadonlyArray<string>;
+    },
     diagnostics?: { method: string; path: string },
   ): string;
   fetchTanks(apiKey: string): Promise<{ tanks: unknown[] }>;
   fetchAlerts(apiKey: string): Promise<{ alerts: unknown[] }>;
   fetchHealth(): Promise<ServiceHealth>;
+  isApiError(error: unknown): error is {
+    kind: string;
+    status: number | null;
+    requiredScopes: ReadonlyArray<string>;
+    requestId: string | null;
+    message: string;
+  };
 }
 
 async function loadApiModule(): Promise<ApiModule> {
@@ -224,5 +236,126 @@ describe('health', () => {
     vi.stubGlobal('fetch', async () => new Response('<html>nope</html>', { status: 200 }));
 
     await expect(fetchHealth()).rejects.toThrow(/did not return JSON/);
+  });
+});
+
+async function failureOf(promise: Promise<unknown>): Promise<unknown> {
+  return promise.then(
+    () => {
+      throw new Error('expected the request to fail');
+    },
+    (error: unknown) => error,
+  );
+}
+
+describe('403 forbidden handling', () => {
+  it('shows the server message and missing scope instead of a message-less rejection', async () => {
+    const { fetchAlerts, isApiError } = await loadApiModule();
+    vi.stubGlobal('fetch', async () =>
+      jsonResponse(
+        {
+          error: 'forbidden',
+          reason: 'insufficient_scope',
+          message:
+            'This API key does not grant the alerts:read scope required for this request. Ask an administrator for a key that includes it.',
+          requiredScopes: ['alerts:read'],
+          requestId: 'req-403',
+        },
+        403,
+      ),
+    );
+
+    const error = await failureOf(fetchAlerts('ftk_key_secret'));
+
+    expect(isApiError(error)).toBe(true);
+    if (!isApiError(error)) return;
+    expect(error.kind).toBe('forbidden');
+    expect(error.status).toBe(403);
+    expect(error.requiredScopes).toEqual(['alerts:read']);
+    expect(error.requestId).toBe('req-403');
+    expect(error.message).toContain('Access denied');
+    expect(error.message).toContain('alerts:read');
+    expect(error.message).toContain('GET /v1/alerts status 403');
+    expect(error.message).toContain('req-403');
+    expect(error.message).not.toContain('without a message');
+    expect(error.message).not.toContain('API key rejected');
+    expect(error.message).not.toContain('ftk_key_secret');
+  });
+
+  it('explains a bare 403 from an older server as a permission problem', async () => {
+    const { describeApiFailure } = await loadApiModule();
+    const message = describeApiFailure(
+      403,
+      { error: 'forbidden', requestId: 'req-old' },
+      { method: 'GET', path: '/v1/alerts' },
+    );
+    expect(message).toContain('Access denied');
+    expect(message).toContain('not permitted');
+    expect(message).not.toContain('without a message');
+  });
+
+  it('names scopes when a 403 carries them but no message', async () => {
+    const { describeApiFailure } = await loadApiModule();
+    const message = describeApiFailure(403, { requiredScopes: ['alerts:read'] });
+    expect(message).toContain('does not grant alerts:read');
+  });
+});
+
+describe('failure classification', () => {
+  it('distinguishes 401 from 403', async () => {
+    const { fetchAlerts, isApiError } = await loadApiModule();
+    vi.stubGlobal('fetch', async () =>
+      jsonResponse(
+        { error: 'unauthorized', message: 'Valid API key credentials are required' },
+        401,
+      ),
+    );
+    const error = await failureOf(fetchAlerts('ftk_key_secret'));
+    expect(isApiError(error) && error.kind).toBe('unauthorized');
+    expect(error instanceof Error && error.message).toContain('unknown, revoked or expired');
+  });
+
+  it('classifies a provisioning fault, a network failure and other statuses', async () => {
+    const { fetchTanks, isApiError } = await loadApiModule();
+
+    vi.stubGlobal('fetch', async () => jsonResponse({ error: 'credentials_not_provisioned' }, 503));
+    const unavailable = await failureOf(fetchTanks('k'));
+    expect(isApiError(unavailable) && unavailable.kind).toBe('unavailable');
+
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    const network = await failureOf(fetchTanks('k'));
+    expect(isApiError(network) && network.kind).toBe('network');
+    expect(isApiError(network) && network.status).toBe(null);
+
+    vi.stubGlobal('fetch', async () => {
+      throw new Error('socket hang up');
+    });
+    const raw = await failureOf(fetchTanks('k'));
+    expect(isApiError(raw) && raw.message).toContain('socket hang up');
+
+    vi.stubGlobal('fetch', async () =>
+      jsonResponse({ error: 'internal_error', requestId: 'r1' }, 500),
+    );
+    const other = await failureOf(fetchTanks('k'));
+    expect(isApiError(other) && other.kind).toBe('other');
+    expect(isApiError(other) && other.message).toContain('status 500');
+    expect(isApiError(other) && other.message).toContain('Request id: r1');
+  });
+
+  it('keeps a short excerpt of a non-JSON error page', async () => {
+    const { fetchTanks } = await loadApiModule();
+    vi.stubGlobal(
+      'fetch',
+      async () => new Response('<html>  Gateway   timeout </html>', { status: 504 }),
+    );
+    await expect(fetchTanks('k')).rejects.toThrow(/Gateway timeout/);
+  });
+
+  it('ignores a JSON error body that is not an object', async () => {
+    const { fetchTanks } = await loadApiModule();
+    vi.stubGlobal('fetch', async () => jsonResponse('nope', 502));
+    await expect(fetchTanks('k')).rejects.toThrow(/status 502/);
   });
 });

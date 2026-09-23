@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { REQUIRED_TABLES, requiredTablesSqlList, type SchemaStatus } from './migrate.js';
+import { REQUIRED_TABLES, type SchemaStatus } from './migrate.js';
 
 declare global {
   var __prisma_client__: PrismaClient | undefined;
@@ -67,12 +67,14 @@ export async function ensureTenantExists(tenantId: string): Promise<void> {
 export async function describePrismaSchemaStatus(): Promise<SchemaStatus> {
   const prisma = getPrismaClient();
   try {
-    // Static SQL built from a compile time constant table list, so the tagged
-    // template needs no parameters and there is nothing to inject.
+    // The table list is bound as one text[] parameter. Interpolating a joined
+    // string here (as an earlier version did) makes Prisma bind the whole list
+    // as a single value, `IN ('''tenants'', ''stations''...')`, which matches no
+    // table, so every healthy database was reported as unmigrated.
     const rows: Array<{ table_name: string }> = await prisma.$queryRaw`
       SELECT table_name FROM information_schema.tables
        WHERE table_schema = 'public'
-         AND table_name IN (${requiredTablesSqlList()})`;
+         AND table_name = ANY(${[...REQUIRED_TABLES]}::text[])`;
     const present = new Set(rows.map((row) => row.table_name));
     const missingTables = REQUIRED_TABLES.filter((table) => !present.has(table));
     return missingTables.length === 0

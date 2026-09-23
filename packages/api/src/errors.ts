@@ -4,6 +4,7 @@ import {
   CredentialsNotProvisionedError,
   ForbiddenError,
   formatIssues,
+  InsufficientScopeError,
   NotFoundError,
   TenantIsolationError,
   TooManyRequestsError,
@@ -16,6 +17,10 @@ import { ZodError } from 'zod';
 interface ErrorBody {
   error: string;
   message?: string | undefined;
+  /** Machine readable refinement of `error`, for example `insufficient_scope`. */
+  reason?: string | undefined;
+  /** Scope names a 403 is missing. Public API vocabulary, never secret. */
+  requiredScopes?: ReadonlyArray<string> | undefined;
   issues?: ReadonlyArray<{ path: string; message: string }> | undefined;
   requestId?: string | undefined;
 }
@@ -95,9 +100,40 @@ export function registerErrorHandler(app: FastifyInstance, logger: Logger): void
         return reply.code(429).send(body);
       }
 
-      if (error instanceof ForbiddenError) {
+      if (error instanceof InsufficientScopeError) {
+        // Authenticated, tenant resolved, but the key lacks a permission. The
+        // body says which scope is missing (RFC 6750 `insufficient_scope`), so
+        // an operator is not left with an unexplained 403. Scope names are the
+        // public API vocabulary; nothing about the key or the tenant is echoed.
+        void reply.header(
+          'WWW-Authenticate',
+          `Bearer realm="fueltrack", error="insufficient_scope", scope="${error.requiredScopes.join(' ')}"`,
+        );
+        logger.warn('auth.forbidden', {
+          requestId,
+          method: request.method,
+          route: request.routeOptions.url ?? request.url,
+          reason: 'insufficient_scope',
+          requiredScopes: error.requiredScopes,
+          keyId: request.tenantContext?.apiKeyId ?? null,
+        });
         const body: ErrorBody = {
           error: 'forbidden',
+          reason: 'insufficient_scope',
+          message: error.message,
+          requiredScopes: error.requiredScopes,
+          ...(requestId === undefined ? {} : { requestId }),
+        };
+        return reply.code(403).send(body);
+      }
+
+      if (error instanceof ForbiddenError) {
+        // Every ForbiddenError message is a fixed, non-secret sentence written
+        // for the caller ("Device is not assigned to this tank"), so it is
+        // returned rather than leaving the client to guess why it was refused.
+        const body: ErrorBody = {
+          error: 'forbidden',
+          message: error.message,
           ...(requestId === undefined ? {} : { requestId }),
         };
         return reply.code(403).send(body);

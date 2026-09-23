@@ -122,6 +122,10 @@ button#disconnect {
   color: var(--ok);
 }
 
+.status.warning {
+  color: var(--warning);
+}
+
 .table-scroll {
   overflow-x: auto;
 }
@@ -155,6 +159,12 @@ td.numeric {
 .empty {
   color: var(--muted);
   font-style: italic;
+}
+
+.empty.error {
+  color: var(--warning);
+  font-style: normal;
+  white-space: normal;
 }
 
 progress {
